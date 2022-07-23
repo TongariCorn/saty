@@ -1,0 +1,155 @@
+18:35:33 [INFO] [Clause { lits: [Lit(1), Lit(-2)] }, Clause { lits: [Lit(1), Lit(3), Lit(-4)] }, Clause { lits: [Lit(-3), Lit(-5)] }, Clause { lits: [Lit(-3), Lit(5)] }, Clause { lits: [Lit(3), Lit(4)] }]
+18:35:33 [INFO] num_vars = 5
+18:35:33 [INFO] Decide: x1 is assigned to be true
+18:35:33 [INFO] Start boolean constraint propagation
+18:35:33 [INFO] assigns: [BOTTOM, TRUE, BOTTOM, BOTTOM, BOTTOM, BOTTOM]
+18:35:33 [INFO] trail: [Assigned Lit(1)]
+18:35:33 [INFO] trail_id: [0, 0, 0, 0, 0, 0]
+18:35:33 [INFO] learnt clauses: []
+18:35:33 [INFO] Clause { lits: [Lit(1), Lit(-2)] }
+18:35:33 [INFO] Clause { lits: [Lit(1), Lit(-2)] } is true
+18:35:33 [INFO] Clause { lits: [Lit(1), Lit(3), Lit(-4)] }
+18:35:33 [INFO] Clause { lits: [Lit(1), Lit(3), Lit(-4)] } is true
+18:35:33 [INFO] Clause { lits: [Lit(-3), Lit(-5)] }
+18:35:33 [INFO] There are more than one unassigned variables in Clause { lits: [Lit(-3), Lit(-5)] }
+18:35:33 [INFO] Clause { lits: [Lit(-3), Lit(5)] }
+18:35:33 [INFO] There are more than one unassigned variables in Clause { lits: [Lit(-3), Lit(5)] }
+18:35:33 [INFO] Clause { lits: [Lit(3), Lit(4)] }
+18:35:33 [INFO] There are more than one unassigned variables in Clause { lits: [Lit(3), Lit(4)] }
+18:35:33 [INFO] Decide: x2 is assigned to be true
+18:35:33 [INFO] Start boolean constraint propagation
+18:35:33 [INFO] assigns: [BOTTOM, TRUE, TRUE, BOTTOM, BOTTOM, BOTTOM]
+18:35:33 [INFO] trail: [Assigned Lit(1), Assigned Lit(2)]
+18:35:33 [INFO] trail_id: [0, 0, 1, 0, 0, 0]
+18:35:33 [INFO] learnt clauses: []
+18:35:33 [INFO] Clause { lits: [Lit(1), Lit(-2)] }
+18:35:33 [INFO] Clause { lits: [Lit(1), Lit(-2)] } is true
+18:35:33 [INFO] Clause { lits: [Lit(1), Lit(3), Lit(-4)] }
+18:35:33 [INFO] Clause { lits: [Lit(1), Lit(3), Lit(-4)] } is true
+18:35:33 [INFO] Clause { lits: [Lit(-3), Lit(-5)] }
+18:35:33 [INFO] There are more than one unassigned variables in Clause { lits: [Lit(-3), Lit(-5)] }
+18:35:33 [INFO] Clause { lits: [Lit(-3), Lit(5)] }
+18:35:33 [INFO] There are more than one unassigned variables in Clause { lits: [Lit(-3), Lit(5)] }
+18:35:33 [INFO] Clause { lits: [Lit(3), Lit(4)] }
+18:35:33 [INFO] There are more than one unassigned variables in Clause { lits: [Lit(3), Lit(4)] }
+18:35:33 [INFO] Decide: x3 is assigned to be true
+18:35:33 [INFO] Start boolean constraint propagation
+18:35:33 [INFO] assigns: [BOTTOM, TRUE, TRUE, TRUE, BOTTOM, BOTTOM]
+18:35:33 [INFO] trail: [Assigned Lit(1), Assigned Lit(2), Assigned Lit(3)]
+18:35:33 [INFO] trail_id: [0, 0, 1, 2, 0, 0]
+18:35:33 [INFO] learnt clauses: []
+18:35:33 [INFO] Clause { lits: [Lit(1), Lit(-2)] }
+18:35:33 [INFO] Clause { lits: [Lit(1), Lit(-2)] } is true
+18:35:33 [INFO] Clause { lits: [Lit(1), Lit(3), Lit(-4)] }
+18:35:33 [INFO] Clause { lits: [Lit(1), Lit(3), Lit(-4)] } is true
+18:35:33 [INFO] Clause { lits: [Lit(-3), Lit(-5)] }
+18:35:33 [INFO] Clause { lits: [Lit(-3), Lit(-5)] } is unit, and a variable 5 is implied
+18:35:33 [INFO] assigns: [BOTTOM, TRUE, TRUE, TRUE, BOTTOM, FALSE]
+18:35:33 [INFO] trail: [Assigned Lit(1), Assigned Lit(2), Assigned Lit(3), Lit(-5) implied by Clause { lits: [Lit(-3), Lit(-5)] }]
+18:35:33 [INFO] trail_id: [0, 0, 1, 2, 0, 3]
+18:35:33 [INFO] learnt clauses: []
+18:35:33 [INFO] Clause { lits: [Lit(1), Lit(-2)] }
+18:35:33 [INFO] Clause { lits: [Lit(1), Lit(-2)] } is true
+18:35:33 [INFO] Clause { lits: [Lit(1), Lit(3), Lit(-4)] }
+18:35:33 [INFO] Clause { lits: [Lit(1), Lit(3), Lit(-4)] } is true
+18:35:33 [INFO] Clause { lits: [Lit(-3), Lit(-5)] }
+18:35:33 [INFO] Clause { lits: [Lit(-3), Lit(-5)] } is true
+18:35:33 [INFO] Clause { lits: [Lit(-3), Lit(5)] }
+18:35:33 [INFO] Conflict occurs in Clause { lits: [Lit(-3), Lit(5)] }
+18:35:33 [INFO] Resolve conflict
+18:35:33 [INFO] trail: [Assigned Lit(1), Assigned Lit(2), Assigned Lit(3), Lit(-5) implied by Clause { lits: [Lit(-3), Lit(-5)] }, Lit(0) implied by Clause { lits: [Lit(-3), Lit(5)] }]
+18:35:33 [INFO] level: [-1, 0, 1, 2]
+18:35:33 [INFO] learnt_vertex: [2, 3]
+18:35:33 [INFO] learnt_vertex: [2]
+18:35:33 [INFO] backjump to level 0
+18:35:33 [INFO] learnt clause: Clause { lits: [Lit(-3)] }
+18:35:33 [INFO] trail: []
+18:35:33 [INFO] assign: [BOTTOM, BOTTOM, BOTTOM, BOTTOM, BOTTOM, BOTTOM]
+18:35:33 [INFO] level: [-1]
+18:35:33 [INFO] Start boolean constraint propagation
+18:35:33 [INFO] assigns: [BOTTOM, BOTTOM, BOTTOM, BOTTOM, BOTTOM, BOTTOM]
+18:35:33 [INFO] trail: []
+18:35:33 [INFO] trail_id: [0, 0, 0, 0, 0, 0]
+18:35:33 [INFO] learnt clauses: [Clause { lits: [Lit(-3)] }]
+18:35:33 [INFO] target clause: Clause { lits: [Lit(-3)] }
+18:35:33 [INFO] Clause { lits: [Lit(-3)] } is unit, and a variable 3 is implied
+18:35:33 [INFO] assigns: [BOTTOM, BOTTOM, BOTTOM, FALSE, BOTTOM, BOTTOM]
+18:35:33 [INFO] trail: [Lit(-3) implied by Clause { lits: [Lit(-3)] }]
+18:35:33 [INFO] trail_id: [0, 0, 0, 0, 0, 0]
+18:35:33 [INFO] learnt clauses: [Clause { lits: [Lit(-3)] }]
+18:35:33 [INFO] target clause: Clause { lits: [Lit(-3)] }
+18:35:33 [INFO] Clause { lits: [Lit(-3)] } is true
+18:35:33 [INFO] Clause { lits: [Lit(1), Lit(-2)] }
+18:35:33 [INFO] There are more than one unassigned variables in Clause { lits: [Lit(1), Lit(-2)] }
+18:35:33 [INFO] Clause { lits: [Lit(1), Lit(3), Lit(-4)] }
+18:35:33 [INFO] There are more than one unassigned variables in Clause { lits: [Lit(1), Lit(3), Lit(-4)] }
+18:35:33 [INFO] Clause { lits: [Lit(-3), Lit(-5)] }
+18:35:33 [INFO] Clause { lits: [Lit(-3), Lit(-5)] } is true
+18:35:33 [INFO] Clause { lits: [Lit(-3), Lit(5)] }
+18:35:33 [INFO] Clause { lits: [Lit(-3), Lit(5)] } is true
+18:35:33 [INFO] Clause { lits: [Lit(3), Lit(4)] }
+18:35:33 [INFO] Clause { lits: [Lit(3), Lit(4)] } is unit, and a variable 4 is implied
+18:35:33 [INFO] assigns: [BOTTOM, BOTTOM, BOTTOM, FALSE, TRUE, BOTTOM]
+18:35:33 [INFO] trail: [Lit(-3) implied by Clause { lits: [Lit(-3)] }, Lit(4) implied by Clause { lits: [Lit(3), Lit(4)] }]
+18:35:33 [INFO] trail_id: [0, 0, 0, 0, 1, 0]
+18:35:33 [INFO] learnt clauses: [Clause { lits: [Lit(-3)] }]
+18:35:33 [INFO] target clause: Clause { lits: [Lit(-3)] }
+18:35:33 [INFO] Clause { lits: [Lit(-3)] } is true
+18:35:33 [INFO] Clause { lits: [Lit(1), Lit(-2)] }
+18:35:33 [INFO] There are more than one unassigned variables in Clause { lits: [Lit(1), Lit(-2)] }
+18:35:33 [INFO] Clause { lits: [Lit(1), Lit(3), Lit(-4)] }
+18:35:33 [INFO] Clause { lits: [Lit(1), Lit(3), Lit(-4)] } is unit, and a variable 1 is implied
+18:35:33 [INFO] assigns: [BOTTOM, TRUE, BOTTOM, FALSE, TRUE, BOTTOM]
+18:35:33 [INFO] trail: [Lit(-3) implied by Clause { lits: [Lit(-3)] }, Lit(4) implied by Clause { lits: [Lit(3), Lit(4)] }, Lit(1) implied by Clause { lits: [Lit(1), Lit(3), Lit(-4)] }]
+18:35:33 [INFO] trail_id: [0, 2, 0, 0, 1, 0]
+18:35:33 [INFO] learnt clauses: [Clause { lits: [Lit(-3)] }]
+18:35:33 [INFO] target clause: Clause { lits: [Lit(-3)] }
+18:35:33 [INFO] Clause { lits: [Lit(-3)] } is true
+18:35:33 [INFO] Clause { lits: [Lit(1), Lit(-2)] }
+18:35:33 [INFO] Clause { lits: [Lit(1), Lit(-2)] } is true
+18:35:33 [INFO] Clause { lits: [Lit(1), Lit(3), Lit(-4)] }
+18:35:33 [INFO] Clause { lits: [Lit(1), Lit(3), Lit(-4)] } is true
+18:35:33 [INFO] Clause { lits: [Lit(-3), Lit(-5)] }
+18:35:33 [INFO] Clause { lits: [Lit(-3), Lit(-5)] } is true
+18:35:33 [INFO] Clause { lits: [Lit(-3), Lit(5)] }
+18:35:33 [INFO] Clause { lits: [Lit(-3), Lit(5)] } is true
+18:35:33 [INFO] Clause { lits: [Lit(3), Lit(4)] }
+18:35:33 [INFO] Clause { lits: [Lit(3), Lit(4)] } is true
+18:35:33 [INFO] Decide: x2 is assigned to be true
+18:35:33 [INFO] Start boolean constraint propagation
+18:35:33 [INFO] assigns: [BOTTOM, TRUE, TRUE, FALSE, TRUE, BOTTOM]
+18:35:33 [INFO] trail: [Lit(-3) implied by Clause { lits: [Lit(-3)] }, Lit(4) implied by Clause { lits: [Lit(3), Lit(4)] }, Lit(1) implied by Clause { lits: [Lit(1), Lit(3), Lit(-4)] }, Assigned Lit(2)]
+18:35:33 [INFO] trail_id: [0, 2, 3, 0, 1, 0]
+18:35:33 [INFO] learnt clauses: [Clause { lits: [Lit(-3)] }]
+18:35:33 [INFO] target clause: Clause { lits: [Lit(-3)] }
+18:35:33 [INFO] Clause { lits: [Lit(-3)] } is true
+18:35:33 [INFO] Clause { lits: [Lit(1), Lit(-2)] }
+18:35:33 [INFO] Clause { lits: [Lit(1), Lit(-2)] } is true
+18:35:33 [INFO] Clause { lits: [Lit(1), Lit(3), Lit(-4)] }
+18:35:33 [INFO] Clause { lits: [Lit(1), Lit(3), Lit(-4)] } is true
+18:35:33 [INFO] Clause { lits: [Lit(-3), Lit(-5)] }
+18:35:33 [INFO] Clause { lits: [Lit(-3), Lit(-5)] } is true
+18:35:33 [INFO] Clause { lits: [Lit(-3), Lit(5)] }
+18:35:33 [INFO] Clause { lits: [Lit(-3), Lit(5)] } is true
+18:35:33 [INFO] Clause { lits: [Lit(3), Lit(4)] }
+18:35:33 [INFO] Clause { lits: [Lit(3), Lit(4)] } is true
+18:35:33 [INFO] Decide: x5 is assigned to be true
+18:35:33 [INFO] Start boolean constraint propagation
+18:35:33 [INFO] assigns: [BOTTOM, TRUE, TRUE, FALSE, TRUE, TRUE]
+18:35:33 [INFO] trail: [Lit(-3) implied by Clause { lits: [Lit(-3)] }, Lit(4) implied by Clause { lits: [Lit(3), Lit(4)] }, Lit(1) implied by Clause { lits: [Lit(1), Lit(3), Lit(-4)] }, Assigned Lit(2), Assigned Lit(5)]
+18:35:33 [INFO] trail_id: [0, 2, 3, 0, 1, 4]
+18:35:33 [INFO] learnt clauses: [Clause { lits: [Lit(-3)] }]
+18:35:33 [INFO] target clause: Clause { lits: [Lit(-3)] }
+18:35:33 [INFO] Clause { lits: [Lit(-3)] } is true
+18:35:33 [INFO] Clause { lits: [Lit(1), Lit(-2)] }
+18:35:33 [INFO] Clause { lits: [Lit(1), Lit(-2)] } is true
+18:35:33 [INFO] Clause { lits: [Lit(1), Lit(3), Lit(-4)] }
+18:35:33 [INFO] Clause { lits: [Lit(1), Lit(3), Lit(-4)] } is true
+18:35:33 [INFO] Clause { lits: [Lit(-3), Lit(-5)] }
+18:35:33 [INFO] Clause { lits: [Lit(-3), Lit(-5)] } is true
+18:35:33 [INFO] Clause { lits: [Lit(-3), Lit(5)] }
+18:35:33 [INFO] Clause { lits: [Lit(-3), Lit(5)] } is true
+18:35:33 [INFO] Clause { lits: [Lit(3), Lit(4)] }
+18:35:33 [INFO] Clause { lits: [Lit(3), Lit(4)] } is true
+18:35:33 [INFO] Decide: there are no more unassigned variables
+18:35:33 [INFO] satisfiable with "[ x1 = true x2 = true x3 = false x4 = true x5 = true]"
