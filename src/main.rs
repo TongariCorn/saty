@@ -29,11 +29,19 @@ fn main() {
     match result.unwrap() {
         dimacs::Instance::Cnf { clauses, num_vars } => { 
             println!("{}", saty::print_clauses(&clauses));
-            let result = saty::solve_sat(clauses, num_vars);
+            let result = saty::solve_sat(&clauses, num_vars);
             match result {
                 SATResult::SAT(assigns) => {
                     println!("satisfiable with {:?}", saty::print_result(&assigns));
                     info!("satisfiable with {:?}", saty::print_result(&assigns));
+
+                    if saty::sanity_check(&clauses, &assigns) {
+                        println!("SANITY CHECK: SUCCESS");
+                        info!("SANITY CHECK: SUCCESS");
+                    } else {
+                        println!("SANITY CHECK: FAILURE");
+                        info!("SANITY CHECK: FAILURE");
+                    }
                 },
                 SATResult::UNSAT => {
                     println!("unsatisfiable");

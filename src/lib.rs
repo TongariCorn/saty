@@ -10,6 +10,20 @@ pub enum SATResult {
     UNSAT
 }
 
+pub fn sanity_check(clauses: &Box<[Clause]>, assigns: &Vec<LBool>) -> bool {
+    'outer: for i in 0..clauses.len() {
+        let clause = &clauses[i];
+        for lit in clause.lits() {
+            if (lit.sign() == Sign::Pos && assigns[lit.var().to_u64() as usize] == LBool::TRUE)
+                || (lit.sign() == Sign::Neg && assigns[lit.var().to_u64() as usize] == LBool::FALSE) {
+                continue 'outer;
+            }
+        }
+        return false
+    }
+    return true
+}
+
 pub fn print_clauses(clauses: &Box<[Clause]>) -> String {
     let mut str = String::from("");
     for i in 0..clauses.len() {
@@ -47,7 +61,7 @@ pub fn print_result(assigns: &Vec<LBool>) -> String {
     return str
 }
 
-pub fn solve_sat(clauses: Box<[Clause]>, num_vars: u64 ) -> SATResult {
+pub fn solve_sat(clauses: &Box<[Clause]>, num_vars: u64 ) -> SATResult {
     info!("{:?}", clauses);
     info!("num_vars = {}", num_vars);
 
@@ -173,7 +187,7 @@ fn decide(assigns: &mut Vec<LBool>, trail: &mut Vec<Trail>, trail_id: &mut Vec<u
                 trail_id[i] = trail.len()-1;
                 level.push(trail.len() as i64 - 1);
 
-                info!("Decide: x{} is assigned to be true", i);
+                info!("Decide: x{} is assigned to true", i);
                 return true
             },
             _ => ()

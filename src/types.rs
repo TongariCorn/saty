@@ -1,7 +1,7 @@
 use std::fmt;
 use dimacs::{Clause, Sign, Lit};
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, PartialEq)]
 pub enum LBool {
     TRUE,
     FALSE,
