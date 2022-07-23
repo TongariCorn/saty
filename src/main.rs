@@ -1,34 +1,15 @@
+use std::env;
+use std::fs;
 use dimacs::parse_dimacs;
 use saty::SATResult;
 
 fn main() {
-    println!("Hello, world!");
+    let args: Vec<String> = env::args().collect();
+    let filename = &args[1];
+    let str = fs::read_to_string(filename).expect("Something went wrong reading the file");
+    println!("{}", &str);
     
-    let str = "c Example CNF format file
-c
-p cnf 4 3
-1 3 -4 0
-4 0 2
--3";
-    let str = "p cnf 5 4
-1 2 0 3
-4 5 0
--2 0";
-    let str = "p cnf 5 6
-1 -2 0
--1 3 -4 0
-1 3 -4 0
--3 -5 0
--3 5 0
-3 4";
-    let str = "p cnf 5 5
-1 -2 0
-1 3 -4 0
--3 -5 0
--3 5 0
-3 4";
-
-    let result = parse_dimacs(str);
+    let result = parse_dimacs(&str);
 
     match result.unwrap() {
         dimacs::Instance::Cnf { clauses, num_vars } => { 
