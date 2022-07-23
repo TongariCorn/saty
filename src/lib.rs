@@ -1,3 +1,4 @@
+use rand::Rng;
 use dimacs::{Clause, Sign, Lit};
 mod types;
 use types::*;
@@ -67,14 +68,18 @@ pub fn solve_sat(clauses: &Box<[Clause]>, num_vars: u64 ) -> SATResult {
 
     // Propositional variable indices in dimacs start at 1
     let num_vars: usize = num_vars.try_into().unwrap();
-    let mut assigns  : Vec<LBool> = Vec::with_capacity(num_vars+1); // index 0 corresponds to bottom
-    let mut trail    : Vec<Trail> = Vec::with_capacity(num_vars);   // assigned/implied literals in chronological order
-    let mut trail_id : Vec<usize> = Vec::with_capacity(num_vars+1); // index in assigns -> index in trail
-    let mut level    : Vec<i64>   = Vec::with_capacity(num_vars+1); // separator indices for different decision levels in trail
+    let mut assigns  : Vec<LBool>      = Vec::with_capacity(num_vars+1); // index 0 corresponds to bottom
+    let mut trail    : Vec<Trail>      = Vec::with_capacity(num_vars);   // assigned/implied literals in chronological order
+    let mut trail_id : Vec<usize>      = Vec::with_capacity(num_vars+1); // index in assigns -> index in trail
+    let mut level    : Vec<i64>        = Vec::with_capacity(num_vars+1); // separator indices for different decision levels in trail
+    let mut watchers : Vec<(Lit, Lit)> = Vec::with_capacity(clauses.len()); // watch two literals in each clauses to make ncp faster
+    let mut marks    : Vec<bool>       = Vec::with_capacity(clauses.len()); // true if each corresponding watcher has changed
     let mut learnt_clauses: Vec<Clause> = Vec::new();
     assigns.resize_with(num_vars+1, Default::default);
     trail_id.resize_with(num_vars+1, Default::default);
+    marks.resize_with(clauses.len(), Default::default);
     level.push(-1); // for simplicity, element at index -1 in trail vector is assumed to be at decision level 0
+    initialize_watchers(&clauses, &mut watchers);
 
 
     loop {
@@ -82,15 +87,64 @@ pub fn solve_sat(clauses: &Box<[Clause]>, num_vars: u64 ) -> SATResult {
             let result = assigns.clone();
             return SATResult::SAT(result)
         }
-        while !boolean_constraint_propagation(&clauses, &learnt_clauses, &mut assigns, &mut trail, &mut trail_id) {
-            if !resolve_conflict(&mut learnt_clauses, &mut assigns, &mut trail, &mut trail_id, &mut level) {
+        while !boolean_constraint_propagation(&clauses, &learnt_clauses, &mut assigns, &mut trail, &mut trail_id, &mut watchers, &mut marks) {
+            if !resolve_conflict(&mut learnt_clauses, &mut assigns, &mut trail, &mut trail_id, &mut level, &mut watchers, &mut marks) {
                 return SATResult::UNSAT
             }
         }
     }
 }
 
-fn boolean_constraint_propagation_for_clause(clause: &Clause, assigns: &mut Vec<LBool>, trail: &mut Vec<Trail>, trail_id: &mut Vec<usize>) -> usize {
+fn instantiate_literal(value: bool, literal: Lit) -> bool {
+    return match literal.sign() {
+        Sign::Pos => value,
+        Sign::Neg => !value
+    }
+}
+
+fn initialize_watchers(clauses: &Box<[Clause]>, watchers: &mut Vec<(Lit,Lit)>) {
+    let mut rng = rand::thread_rng();
+    for i in 0..clauses.len() {
+        let left = rng.gen_range(0..clauses[i].len());
+        let mut right = left;
+        if clauses[i].len() > 1 {
+            right = rng.gen_range(0..clauses[i].len()-1);
+            if left == right {
+                right += 1
+            }
+        }
+        watchers.push((clauses[i].lits()[left], clauses[i].lits()[right]));
+    }
+    info!("{:?}", watchers);
+}
+
+fn check_watchers(assigns: &Vec<LBool>, watchers: &mut Vec<(Lit,Lit)>, marks: &mut Vec<bool>) {
+    for i in 0..watchers.len() {
+        if assigns[watchers[i].0.var().to_u64() as usize] == LBool::BOTTOM
+            && assigns[watchers[i].1.var().to_u64() as usize] == LBool::BOTTOM {
+                // If both watchers watch the same literal, this means the correspoing clause has only one
+                // literal. In this case, marks should be true.
+                marks[i] = watchers[i].0 == watchers[i].1;
+                continue;
+            }
+        let mut flag = false;   // flag == true => the clause is true
+        match assigns[watchers[i].0.var().to_u64() as usize] {
+            LBool::TRUE  => flag = instantiate_literal(true, watchers[i].0),
+            LBool::FALSE => flag = instantiate_literal(false, watchers[i].0),
+            _            => ()
+        }
+        match assigns[watchers[i].1.var().to_u64() as usize] {
+            LBool::TRUE  => flag |= instantiate_literal(true, watchers[i].1),
+            LBool::FALSE => flag |= instantiate_literal(false, watchers[i].1),
+            _            => ()
+        }
+        marks[i] = !flag;
+    }
+    info!("watchers: {:?}", watchers);
+    info!("marks: {:?}", marks);
+}
+
+fn boolean_constraint_propagation_for_clause(clause_id: usize, clause: &Clause, assigns: &mut Vec<LBool>, trail: &mut Vec<Trail>, trail_id: &mut Vec<usize>, watchers: &mut Vec<(Lit,Lit)>, marks: &mut Vec<bool>) -> usize {
     // conflict occurs   -> 0
     // assignment occurs -> 1
     // otherwise         -> 2
@@ -98,11 +152,12 @@ fn boolean_constraint_propagation_for_clause(clause: &Clause, assigns: &mut Vec<
     let mut unassigned_id = 0;
     for j in 0..clause.len() {
         let curr_id: usize =  clause.lits()[j].var().to_u64().try_into().unwrap();
-        let literal_valeu = match clause.lits()[j].sign() { Sign::Pos => assigns[curr_id], Sign::Neg => negate(assigns[curr_id]) };
-        match literal_valeu {
+        let literal_value = match clause.lits()[j].sign() { Sign::Pos => assigns[curr_id], Sign::Neg => negate(assigns[curr_id]) };
+        match literal_value {
             LBool::TRUE => {
                 // This clause is true
                 info!("{:?} is true", clause);
+                marks[clause_id] = false;
                 return 2
             },
             LBool::FALSE => {
@@ -110,8 +165,23 @@ fn boolean_constraint_propagation_for_clause(clause: &Clause, assigns: &mut Vec<
             },
             LBool::BOTTOM => {
                 if unassigned_exist {
-                    // there are more than one unassigned variables in this clause
+                    // there are more than one unassigned variables in this clause, i.e.,
+                    // unassigned_id & j
                     info!("There are more than one unassigned variables in {:?}", clause);
+
+                    // replace watchers in this clause
+                    if clause.len() > 2 {
+                        if assigns[watchers[clause_id].0.var().to_u64() as usize] != LBool::BOTTOM {    // replace left watcher
+                            if watchers[clause_id].1.var().to_u64() as usize == unassigned_id { watchers[clause_id].0 = clause.lits()[j]; }
+                            else { watchers[clause_id].0 = clause.lits()[unassigned_id]; }
+                        } 
+                        if assigns[watchers[clause_id].1.var().to_u64() as usize] != LBool::BOTTOM {    // replace right watcher
+                            if watchers[clause_id].0.var().to_u64() as usize == unassigned_id { watchers[clause_id].1 = clause.lits()[j]; }
+                            else { watchers[clause_id].1 = clause.lits()[unassigned_id]; }
+                        } 
+                        info!("watcher replacement may have happened at clause {}, new watchers are {:?}", clause_id, watchers);
+                    }
+                    marks[clause_id] = false;
                     return 2
                 }
                 unassigned_exist = true;
@@ -139,7 +209,7 @@ fn boolean_constraint_propagation_for_clause(clause: &Clause, assigns: &mut Vec<
     }
 }
 
-fn boolean_constraint_propagation(clauses: &Box<[Clause]>, learnt_clauses: &Vec<Clause>, assigns: &mut Vec<LBool>, trail: &mut Vec<Trail>, trail_id: &mut Vec<usize>) -> bool {
+fn boolean_constraint_propagation(clauses: &Box<[Clause]>, learnt_clauses: &Vec<Clause>, assigns: &mut Vec<LBool>, trail: &mut Vec<Trail>, trail_id: &mut Vec<usize>, watchers: &mut Vec<(Lit,Lit)>, marks: &mut Vec<bool>) -> bool {
     // there are no more implications -> true
     // conflict is produced           -> false
     info!("Start boolean constraint propagation");
@@ -149,11 +219,16 @@ fn boolean_constraint_propagation(clauses: &Box<[Clause]>, learnt_clauses: &Vec<
         info!("trail_id: {:?}", trail_id);
         info!("learnt clauses: {:?}", learnt_clauses);
 
+        info!("check watchers");
+        check_watchers(assigns, watchers, marks);
+
         for i in 0..learnt_clauses.len() {
             let clause = &learnt_clauses[i];
+            if !marks[clauses.len()+i] { continue; }
+
             info!("target clause: {:?}", clause);
 
-            match boolean_constraint_propagation_for_clause(clause, assigns, trail, trail_id) {
+            match boolean_constraint_propagation_for_clause(clauses.len()+i, clause, assigns, trail, trail_id, watchers, marks) {
                 0 => return false,
                 1 => continue 'restart,
                 _ => ()
@@ -162,9 +237,11 @@ fn boolean_constraint_propagation(clauses: &Box<[Clause]>, learnt_clauses: &Vec<
 
         for i in 0..clauses.len() {
             let clause = &clauses[i];
+            if !marks[i] { continue; }
+
             info!("{:?}", clause);
 
-            match boolean_constraint_propagation_for_clause(clause, assigns, trail, trail_id) {
+            match boolean_constraint_propagation_for_clause(i, clause, assigns, trail, trail_id, watchers, marks) {
                 0 => return false,
                 1 => continue 'restart,
                 _ => ()
@@ -197,7 +274,7 @@ fn decide(assigns: &mut Vec<LBool>, trail: &mut Vec<Trail>, trail_id: &mut Vec<u
     return false
 }
 
-fn resolve_conflict(learnt_clauses: &mut Vec<Clause>, assigns: &mut Vec<LBool>, trail: &mut Vec<Trail>, trail_id: &mut Vec<usize>, level: &mut Vec<i64>) -> bool {
+fn resolve_conflict(learnt_clauses: &mut Vec<Clause>, assigns: &mut Vec<LBool>, trail: &mut Vec<Trail>, trail_id: &mut Vec<usize>, level: &mut Vec<i64>, watchers: &mut Vec<(Lit,Lit)>, marks: &mut Vec<bool>) -> bool {
     info!("Resolve conflict");
     if level.len() == 1 {    // current decision level is 0, so this proposition is unsatisfiable
         return false
@@ -248,6 +325,15 @@ fn resolve_conflict(learnt_clauses: &mut Vec<Clause>, assigns: &mut Vec<LBool>, 
                     }
                     let learnt_clause = Clause::from_vec(learnt_clause);
                     info!("learnt clause: {:?}", learnt_clause);
+
+                    // add new watchers before learnt_clause is moved
+                    let mut rng = rand::thread_rng();
+                    let left = if learnt_clause.len() == 1 { 0 } else { rng.gen_range(0..learnt_clause.len()-1) };
+                    let right = learnt_clause.len()-1;
+                    watchers.push((learnt_clause.lits()[left], learnt_clause.lits()[right]));
+                    marks.push(true);
+
+                    // add learnt clause
                     learnt_clauses.push(learnt_clause);
 
                     for t in &trail[level[back_level+1] as usize..] {
