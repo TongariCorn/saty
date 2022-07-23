@@ -82,33 +82,32 @@ pub fn solve_sat(clauses: Box<[Clause]>, num_vars: u64 ) -> SATResult {
     println!("{:?}", clauses);
     println!("num_vars = {}", num_vars);
 
-    // Propositional variable indexes in dimacs start at 1
+    // Propositional variable indices in dimacs start at 1
     let num_vars: usize = num_vars.try_into().unwrap();
     let mut assigns  : Vec<LBool> = Vec::with_capacity(num_vars+1); // index 0 corresponds to bottom
     let mut trail    : Vec<Trail> = Vec::with_capacity(num_vars);   // assigned/implied literals in chronological order
     let mut trail_id : Vec<usize> = Vec::with_capacity(num_vars+1); // index in assigns -> index in trail
-    let mut level    : Vec<usize> = Vec::with_capacity(num_vars+1);
-    let mut curr_level: usize = 0;
+    let mut level    : Vec<i64>   = Vec::with_capacity(num_vars+1); // separator indices for different decision levels in trail
     let mut learnt_clauses: Vec<Clause> = Vec::new();
     assigns.resize_with(num_vars+1, Default::default);
     trail_id.resize_with(num_vars+1, Default::default);
-    level.resize_with(num_vars+1, Default::default);
+    level.push(-1); // for simplicity, element at index -1 in trail vector is assumed to be at decision level 0
 
 
     loop {
-        if !decide(&mut assigns, &mut trail, &mut trail_id, &mut level, &mut curr_level) {
+        if !decide(&mut assigns, &mut trail, &mut trail_id, &mut level) {
             let result = assigns.clone();
             return SATResult::SAT(result)
         }
-        while !boolean_constraint_propagation(&clauses, &learnt_clauses, &mut assigns, &mut trail, &mut trail_id, &mut level, &mut curr_level) {
-            if !resolve_conflict(&mut learnt_clauses, &mut assigns, &mut trail, &mut trail_id, &mut level, &mut curr_level) {
+        while !boolean_constraint_propagation(&clauses, &learnt_clauses, &mut assigns, &mut trail, &mut trail_id) {
+            if !resolve_conflict(&mut learnt_clauses, &mut assigns, &mut trail, &mut trail_id, &mut level) {
                 return SATResult::UNSAT
             }
         }
     }
 }
 
-fn boolean_constraint_propagation_for_clause(clause: &Clause, assigns: &mut Vec<LBool>, trail: &mut Vec<Trail>, trail_id: &mut Vec<usize>, level: &mut Vec<usize>, curr_level: &mut usize) -> usize {
+fn boolean_constraint_propagation_for_clause(clause: &Clause, assigns: &mut Vec<LBool>, trail: &mut Vec<Trail>, trail_id: &mut Vec<usize>) -> usize {
     // conflict occurs   -> 0
     // assignment occurs -> 1
     // otherwise         -> 2
@@ -146,7 +145,6 @@ fn boolean_constraint_propagation_for_clause(clause: &Clause, assigns: &mut Vec<
         };
         trail.push(Trail::new_implied_trail(clause.lits()[unassigned_id], clause.clone()));
         trail_id[curr_id] = trail.len()-1;
-        level[curr_id] = *curr_level;
 
         // new assignment happens, so repeat boolean propagation from start
         return 1
@@ -154,26 +152,24 @@ fn boolean_constraint_propagation_for_clause(clause: &Clause, assigns: &mut Vec<
         println!("Conflict occurs in {:?}", clause);
         trail.push(Trail::new_bottom_trail(clause.clone()));
         trail_id[0] = trail.len()-1;
-        level[0] = *curr_level;
         return 0
     }
 }
 
-fn boolean_constraint_propagation(clauses: &Box<[Clause]>, learnt_clauses: &Vec<Clause>, assigns: &mut Vec<LBool>, trail: &mut Vec<Trail>, trail_id: &mut Vec<usize>, level: &mut Vec<usize>, curr_level: &mut usize) -> bool {
+fn boolean_constraint_propagation(clauses: &Box<[Clause]>, learnt_clauses: &Vec<Clause>, assigns: &mut Vec<LBool>, trail: &mut Vec<Trail>, trail_id: &mut Vec<usize>) -> bool {
     // there are no more implications -> true
     // conflict is produced           -> false
     'restart: loop {
         println!("{:?}", assigns);
         println!("Trail: {:?}", trail);
         println!("Trail_id: {:?}", trail_id);
-        println!("{:?}", level);
         println!("learnt clauses: {:?}", learnt_clauses);
 
         for i in 0..learnt_clauses.len() {
             let clause = &learnt_clauses[i];
             println!("target clause: {:?}", clause);
 
-            match boolean_constraint_propagation_for_clause(clause, assigns, trail, trail_id, level, curr_level) {
+            match boolean_constraint_propagation_for_clause(clause, assigns, trail, trail_id) {
                 0 => return false,
                 1 => continue 'restart,
                 _ => ()
@@ -184,7 +180,7 @@ fn boolean_constraint_propagation(clauses: &Box<[Clause]>, learnt_clauses: &Vec<
             let clause = &clauses[i];
             println!("{:?}", clause);
 
-            match boolean_constraint_propagation_for_clause(clause, assigns, trail, trail_id, level, curr_level) {
+            match boolean_constraint_propagation_for_clause(clause, assigns, trail, trail_id) {
                 0 => return false,
                 1 => continue 'restart,
                 _ => ()
@@ -196,7 +192,7 @@ fn boolean_constraint_propagation(clauses: &Box<[Clause]>, learnt_clauses: &Vec<
 }
 
 // select a variable that is not currently assigned, and give it a value
-fn decide(assigns: &mut Vec<LBool>, trail: &mut Vec<Trail>, trail_id: &mut Vec<usize>, level: &mut Vec<usize>, curr_level: &mut usize) -> bool {
+fn decide(assigns: &mut Vec<LBool>, trail: &mut Vec<Trail>, trail_id: &mut Vec<usize>, level: &mut Vec<i64>) -> bool {
     // there is no unassigned variables -> false
     // otherwise                        -> true
     for i in 1..assigns.len() {
@@ -205,8 +201,7 @@ fn decide(assigns: &mut Vec<LBool>, trail: &mut Vec<Trail>, trail_id: &mut Vec<u
                 assigns[i] = LBool::TRUE;
                 trail.push(Trail::new_assigned_trail(i, true));
                 trail_id[i] = trail.len()-1;
-                *curr_level += 1;
-                level[i] = *curr_level;
+                level.push(trail.len() as i64 - 1);
                 return true
             },
             _ => ()
@@ -215,8 +210,8 @@ fn decide(assigns: &mut Vec<LBool>, trail: &mut Vec<Trail>, trail_id: &mut Vec<u
     return false
 }
 
-fn resolve_conflict(learnt_clauses: &mut Vec<Clause>, assigns: &mut Vec<LBool>, trail: &mut Vec<Trail>, trail_id: &mut Vec<usize>, level: &mut Vec<usize>, curr_level: &mut usize) -> bool {
-    if *curr_level == 0 {    // this proposition is unsatisfiable
+fn resolve_conflict(learnt_clauses: &mut Vec<Clause>, assigns: &mut Vec<LBool>, trail: &mut Vec<Trail>, trail_id: &mut Vec<usize>, level: &mut Vec<i64>) -> bool {
+    if level.len() == 1 {    // current decision level is 0, so this proposition is unsatisfiable
         return false
     }
     println!("trail: {:?}", trail);
@@ -243,10 +238,20 @@ fn resolve_conflict(learnt_clauses: &mut Vec<Clause>, assigns: &mut Vec<LBool>, 
                 learnt_vertex.retain(|vertex| trail[*vertex].literal.var() != last_vertex);
 
                 println!("learnt_vertex: {:?}", learnt_vertex);
-                if learnt_vertex.len() == 1 || level[trail[learnt_vertex[learnt_vertex.len() - 2]].literal.var().to_u64() as usize] != *curr_level {
+                if learnt_vertex.len() == 1 || (learnt_vertex[learnt_vertex.len() - 2] as i64) < *level.last().unwrap() {
                     // found UIP, so construct a learnt clause from learnt_vertex
                     // backjump to the second largest decision level
-                    let back_level = if learnt_vertex.len() == 1 { 0 } else { level[trail[learnt_vertex[learnt_vertex.len() - 2]].literal.var().to_u64() as usize] };
+                    let back_level = if learnt_vertex.len() == 1 { 0 } else { 
+                        // check the second largest decision level among learnt_vertex
+                        let mut l = 0;
+                        for dl in (0..level.len()-1).rev() {
+                            if level[dl] < learnt_vertex[learnt_vertex.len() - 2] as i64 {
+                                l = dl;
+                                break;
+                            }
+                        }
+                        l
+                    };
                     println!("backjump to level {:?}", back_level);
 
                     let mut learnt_clause: Vec<Lit> = Vec::new();
@@ -257,17 +262,17 @@ fn resolve_conflict(learnt_clauses: &mut Vec<Clause>, assigns: &mut Vec<LBool>, 
                     println!("learnt clause: {:?}", learnt_clause);
                     learnt_clauses.push(learnt_clause);
 
-                    while trail.len() > 0 && level[trail.last().unwrap().literal.var().to_u64() as usize] > back_level {
-                        trail.pop();
+                    for t in &trail[level[back_level+1] as usize..] {
+                        let index = t.literal.var().to_u64() as usize;
+                        assigns[index] = LBool::BOTTOM;
+                        trail_id[index] = 0;
                     }
-                    for i in 0..level.len() {
-                        if level[i] > back_level {
-                            level[i] = 0;
-                            trail_id[i] = 0;
-                            assigns[i] = LBool::BOTTOM;
-                        }
-                    }
-                    *curr_level = back_level;
+                    trail.truncate(level[back_level+1] as usize);
+                    level.truncate(back_level+1);
+
+                    println!("trail: {:?}", trail);
+                    println!("assign: {:?}", assigns);
+                    println!("level: {:?}", level);
 
                     return true
                 }
