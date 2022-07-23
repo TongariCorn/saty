@@ -23,7 +23,6 @@ fn main() {
     }
     let filename = &args[1];
     let str = fs::read_to_string(filename).expect("Something went wrong reading the file");
-    println!("{}", &str);
     
     let result = parse_dimacs(&str);
 
