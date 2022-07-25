@@ -1,5 +1,5 @@
 use std::fmt;
-use dimacs::{Clause, Sign, Lit};
+use dimacs::{Sign, Lit};
 
 #[derive(Copy, Clone, PartialEq)]
 pub enum LBool {
@@ -8,10 +8,10 @@ pub enum LBool {
     BOTTOM
 }
 
-pub fn negate(l: LBool) -> LBool {
+pub fn evaluate_literal(l: LBool, lit: Lit) -> LBool {
     return match l {
-        LBool::TRUE  => LBool::FALSE,
-        LBool::FALSE => LBool::TRUE,
+        LBool::TRUE  => match lit.sign() { Sign::Pos => LBool::TRUE, Sign::Neg => LBool::FALSE },
+        LBool::FALSE => match lit.sign() { Sign::Pos => LBool::FALSE, Sign::Neg => LBool::TRUE },
         _            => LBool::BOTTOM
     }
 }
@@ -39,7 +39,7 @@ impl Default for LBool {
 
 pub enum TrailType {
     AssignedTrail,
-    ImpliedTrail(Clause)
+    ImpliedTrail(usize)
 }
 
 pub struct Trail {
@@ -54,13 +54,13 @@ impl Trail {
         return Trail { trail_type: TrailType::AssignedTrail, literal: lit }
     }
 
-    pub fn new_implied_trail(literal: Lit, clause: Clause) -> Self {
-        return Trail { trail_type: TrailType::ImpliedTrail(clause), literal: literal }
+    pub fn new_implied_trail(literal: Lit, clause_id: usize) -> Self {
+        return Trail { trail_type: TrailType::ImpliedTrail(clause_id), literal: literal }
     }
 
-    pub fn new_bottom_trail(clause: Clause) -> Self {
+    pub fn new_bottom_trail(clause_id: usize) -> Self {
         let lit = Lit::from_i64(0); // bottom literal
-        return Trail { trail_type: TrailType::ImpliedTrail(clause), literal: lit }
+        return Trail { trail_type: TrailType::ImpliedTrail(clause_id), literal: lit }
     }
 }
 
@@ -68,7 +68,7 @@ impl fmt::Debug for Trail {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match &self.trail_type {
             TrailType::AssignedTrail        => write!(f, "Assigned {:?}", self.literal),
-            TrailType::ImpliedTrail(clause) => write!(f, "{:?} implied by {:?}", self.literal, clause),
+            TrailType::ImpliedTrail(clause_id) => write!(f, "{:?} implied by  clause {}", self.literal, clause_id),
         }
     }
 }
