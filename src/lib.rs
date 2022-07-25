@@ -3,6 +3,7 @@ use rand::Rng;
 use dimacs::{Clause, Sign, Lit};
 mod types;
 use types::*;
+use indicatif::{ProgressBar, ProgressStyle};
 
 #[macro_use] extern crate log;
 extern crate simplelog;
@@ -84,8 +85,18 @@ pub fn solve_sat(clauses: &Box<[Clause]>, num_vars: u64 ) -> SATResult {
     level.push(-1); // for simplicity, element at index -1 in trail vector is assumed to be at decision level 0
     initialize_watchers(&clauses, &mut watchers, &mut watcher_to_clause);
 
+    let pb = ProgressBar::new(num_vars as u64);
+    pb.set_style(ProgressStyle::default_bar().template("[{elapsed_precise}] {bar:40.cyan/blue} {pos:>7}/{len:7} {msg}"));
+    pb.set_message("learnt_clauses=0");
+    let mut counter = 0;
 
     loop {
+        counter += 1;
+        if counter > 100 {
+            counter = 0;
+            pb.set_position((trail.len()-1) as u64);
+            pb.set_message(format!("learnt_clauses={}",learnt_clauses.len()));
+        }
         if !decide(&mut assigns, &mut trail, &mut trail_id, &mut level, &mut marks, &mut watcher_to_clause) {
             let result = assigns.clone();
             return SATResult::SAT(result)
@@ -147,7 +158,7 @@ fn boolean_constraint_propagation_for_clause(clause_id: usize, clause: &Clause, 
                         if assigns[watchers[clause_id].0.var().to_u64() as usize] != LBool::BOTTOM {    // replace left watcher
                             watcher_to_clause[watchers[clause_id].0.var().to_u64() as usize].remove(&(watchers[clause_id].0.sign(),clause_id));
 
-                            if watchers[clause_id].1.var().to_u64() as usize == unassigned_id { watchers[clause_id].0 = clause.lits()[j]; }
+                            if watchers[clause_id].1.var() == clause.lits()[unassigned_id].var() { watchers[clause_id].0 = clause.lits()[j]; }
                             else { watchers[clause_id].0 = clause.lits()[unassigned_id]; }
 
                             watcher_to_clause[watchers[clause_id].0.var().to_u64() as usize].insert((watchers[clause_id].0.sign(),clause_id));
@@ -155,7 +166,7 @@ fn boolean_constraint_propagation_for_clause(clause_id: usize, clause: &Clause, 
                         if assigns[watchers[clause_id].1.var().to_u64() as usize] != LBool::BOTTOM {    // replace right watcher
                             watcher_to_clause[watchers[clause_id].1.var().to_u64() as usize].remove(&(watchers[clause_id].1.sign(),clause_id));
 
-                            if watchers[clause_id].0.var().to_u64() as usize == unassigned_id { watchers[clause_id].1 = clause.lits()[j]; }
+                            if watchers[clause_id].0.var() == clause.lits()[unassigned_id].var() { watchers[clause_id].1 = clause.lits()[j]; }
                             else { watchers[clause_id].1 = clause.lits()[unassigned_id]; }
 
                             watcher_to_clause[watchers[clause_id].1.var().to_u64() as usize].insert((watchers[clause_id].1.sign(),clause_id));
@@ -213,7 +224,7 @@ fn boolean_constraint_propagation(clauses: &Box<[Clause]>, learnt_clauses: &Vec<
         //info!("check watchers");
         //check_watchers(assigns, watchers, marks);
 
-        for i in 0..learnt_clauses.len() {
+        for i in (0..learnt_clauses.len()).rev() {
             let clause = &learnt_clauses[i];
             if !marks[clauses.len()+i] { continue; }
 
@@ -304,7 +315,7 @@ fn resolve_conflict(clauses: &Box<[Clause]>, learnt_clauses: &mut Vec<Clause>, a
                         // check the second largest decision level among learnt_vertex
                         let mut l = 0;
                         for dl in (0..level.len()-1).rev() {
-                            if level[dl] < learnt_vertex[learnt_vertex.len() - 2] as i64 {
+                            if level[dl] <= learnt_vertex[learnt_vertex.len() - 2] as i64 {
                                 l = dl;
                                 break;
                             }
@@ -318,7 +329,7 @@ fn resolve_conflict(clauses: &Box<[Clause]>, learnt_clauses: &mut Vec<Clause>, a
                         learnt_clause.push(negate_literal(trail[vertex].literal));
                     }
                     let learnt_clause = Clause::from_vec(learnt_clause);
-                    info!("learnt clause: {:?}", learnt_clause);
+                    warn!("learnt clause: {:?}", learnt_clause);
 
                     // add new watchers before learnt_clause is moved
                     let mut rng = rand::thread_rng();
@@ -328,7 +339,8 @@ fn resolve_conflict(clauses: &Box<[Clause]>, learnt_clauses: &mut Vec<Clause>, a
                     watcher_to_clause[learnt_clause.lits()[ left].var().to_u64() as usize].insert((learnt_clause.lits()[ left].sign(),clauses.len() + learnt_clauses.len()));
                     watcher_to_clause[learnt_clause.lits()[right].var().to_u64() as usize].insert((learnt_clause.lits()[right].sign(),clauses.len() + learnt_clauses.len()));
                     marks.fill(false);
-                    marks[clauses.len()..].fill(true);  // learnt clauses are marked
+                    //marks[clauses.len()..].fill(true);  // learnt clauses are marked
+                    marks.fill(true);
                     marks.push(true);
 
                     // add learnt clause

@@ -13,6 +13,7 @@ fn main() {
         vec![
             TermLogger::new(LevelFilter::Warn, Config::default(), TerminalMode::Mixed, ColorChoice::Auto),
             WriteLogger::new(LevelFilter::Info, Config::default(), File::create("solver.log").unwrap()),
+            WriteLogger::new(LevelFilter::Warn, Config::default(), File::create("warn.log").unwrap()),
         ]
     ).unwrap();
 
@@ -23,7 +24,12 @@ fn main() {
     }
     let filename = &args[1];
     let str = fs::read_to_string(filename).expect("Something went wrong reading the file");
-    
+
+/*    let str = "p cnf 3 3
+1 0
+-1 -2 3 0
+-1 -2 -3";
+*/   
     let result = parse_dimacs(&str);
 
     match result.unwrap() {
