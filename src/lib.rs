@@ -102,6 +102,9 @@ pub fn solve_sat(clauses: &Box<[Clause]>, num_vars: u64 ) -> SATResult {
                 return SATResult::UNSAT
             }
         }
+        // If decision level is 0, clauses can be simplified.
+        if level.len() == 1 { simplify_clauses(&clauses, &learnt_clauses, &assigns, &mut watchers, &mut watcher_to_clause); }
+
         if !decide(&mut assigns, &mut trail, &mut trail_id, &mut level, &mut marks, &mut watcher_to_clause) {
             let result = assigns.clone();
             return SATResult::SAT(result)
@@ -148,6 +151,37 @@ fn check_watchers(clauses: &Box<[Clause]>, learnt_clauses: &Vec<Clause>, assigns
                 }
             },
         }
+    }
+}
+
+fn simplify_clause(clause_id: usize, clause: &Clause, assigns: &Vec<LBool>, watchers: &mut Vec<(Lit,Lit)>, watcher_to_clause: &mut Vec<HashSet<(Sign,usize)>>) {
+    for i in 0..clause.len() {
+        let curr_id: usize =  clause.lits()[i].var().to_u64().try_into().unwrap();
+        let literal_value = evaluate_literal(assigns[curr_id], clause.lits()[i]);
+        if literal_value == LBool::TRUE {
+            watcher_to_clause[watchers[clause_id].0.var().to_u64() as usize].remove(&(watchers[clause_id].0.sign(),clause_id));
+            watcher_to_clause[watchers[clause_id].1.var().to_u64() as usize].remove(&(watchers[clause_id].0.sign(),clause_id));
+            watchers[clause_id].0 = clause.lits()[i];
+            watchers[clause_id].1 = clause.lits()[i];
+            info!("{:?} with clause id {} is simplified by a variable {}", clause, clause_id, curr_id);
+            break;
+        }
+    }
+}
+
+fn simplify_clauses(clauses: &Box<[Clause]>, learnt_clauses: &Vec<Clause>, assigns: &Vec<LBool>, watchers: &mut Vec<(Lit,Lit)>, watcher_to_clause: &mut Vec<HashSet<(Sign,usize)>>) {
+    // If there are clauses which is true at decision level 0, these clauses can be ignored.
+    // However, we use clause_id to identify each clause in our implementation, and so clauses
+    // cannot be removed. Instead, we adopt a way of forcing watchers to watch the same literal
+    // which is true at decision level 0.
+    info!("Clause Simplification");
+    for i in 0..clauses.len() {
+        if watchers[i].0 == watchers[i].1 { continue; }
+        simplify_clause(i, &clauses[i], assigns, watchers, watcher_to_clause);
+    }
+    for i in 0..learnt_clauses.len() {
+        if watchers[clauses.len()+i].0 == watchers[clauses.len()+i].1 { continue; }
+        simplify_clause(clauses.len()+i, &learnt_clauses[i], assigns, watchers, watcher_to_clause);
     }
 }
 
@@ -237,7 +271,9 @@ fn boolean_constraint_propagation(clauses: &Box<[Clause]>, learnt_clauses: &Vec<
     // there are no more implications -> true
     // conflict is produced           -> false
     info!("Start boolean constraint propagation");
-    'restart: loop {
+
+    let mut unchanged = true;
+    loop {
         info!("assigns: {:?}", assigns);
         info!("trail: {:?}", trail);
         info!("trail_id: {:?}", trail_id);
@@ -253,11 +289,11 @@ fn boolean_constraint_propagation(clauses: &Box<[Clause]>, learnt_clauses: &Vec<
             let clause = &learnt_clauses[i];
             if !marks[clauses.len()+i] { continue; }
 
-            info!("target clause: {:?}", clause);
+            info!("target clause: {:?} with clause id {}", clause, clauses.len()+i);
 
             match boolean_constraint_propagation_for_clause(clauses.len()+i, clause, assigns, trail, trail_id, watchers, marks, watcher_to_clause) {
                 0 => return false,
-                1 => continue 'restart,
+                1 => unchanged = false,
                 _ => ()
             }
         }
@@ -266,15 +302,16 @@ fn boolean_constraint_propagation(clauses: &Box<[Clause]>, learnt_clauses: &Vec<
             let clause = &clauses[i];
             if !marks[i] { continue; }
 
-            info!("{:?}", clause);
+            info!("target clause: {:?} with clause id {}", clause, i);
 
             match boolean_constraint_propagation_for_clause(i, clause, assigns, trail, trail_id, watchers, marks, watcher_to_clause) {
                 0 => return false,
-                1 => continue 'restart,
+                1 => unchanged = false,
                 _ => ()
             }
         }
-        break;
+        if unchanged { break; }
+        else { unchanged = true; }
     }
     return true
 }
