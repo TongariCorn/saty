@@ -78,17 +78,23 @@ pub fn solve_sat(clauses: &Box<[Clause]>, num_vars: u64 ) -> SATResult {
     let mut marks    : Vec<bool>       = Vec::with_capacity(clauses.len()); // true if each corresponding watcher has changed
     let mut watcher_to_clause : Vec<HashSet<(Sign, usize)>> = Vec::with_capacity(num_vars+1); // index in assigns -> index of clause where corresponding watcher exists
     let mut learnt_clauses: Vec<Clause> = Vec::new();
+    let mut vsids_counter: Vec<f64>    = Vec::with_capacity(2*(num_vars+1));    // used for Variable State Independent Decaying Sum decision heuristic
     assigns.resize_with(num_vars+1, Default::default);
     trail_id.resize_with(num_vars+1, Default::default);
     marks.resize_with(clauses.len(), Default::default);
     watcher_to_clause.resize_with(num_vars+1, Default::default);
+    vsids_counter.resize_with(2*(num_vars+1), Default::default);
     level.push(-1); // for simplicity, element at index -1 in trail vector is assumed to be at decision level 0
     initialize_watchers(&clauses, &mut watchers, &mut marks, &mut watcher_to_clause);
+    initialize_vsids_counter(&clauses, &mut vsids_counter);
+    println!("VSIDS counter = {:?}", vsids_counter);
 
     let pb = ProgressBar::new(num_vars as u64);
     pb.set_style(ProgressStyle::default_bar().template("[{elapsed_precise}] {bar:40.cyan/blue} {pos:>7}/{len:7} {msg}"));
     pb.set_message("learnt_clauses=0, dl=0");
     let mut counter = 0;
+    let mut vsids_interval = 0;
+    let mut restart_interval = 0;
 
     loop {
         counter += 1;
@@ -98,14 +104,29 @@ pub fn solve_sat(clauses: &Box<[Clause]>, num_vars: u64 ) -> SATResult {
             pb.set_message(format!("learnt_clauses={}, dl={}",learnt_clauses.len(), level.len()-1));
         }
         while !boolean_constraint_propagation(&clauses, &learnt_clauses, &mut assigns, &mut trail, &mut trail_id, &mut watchers, &mut marks, &mut watcher_to_clause) {
-            if !resolve_conflict(clauses, &mut learnt_clauses, &mut assigns, &mut trail, &mut trail_id, &mut level, &mut watchers, &mut marks, &mut watcher_to_clause) {
+            // Conflict happens
+            if !resolve_conflict(clauses, &mut learnt_clauses, &mut assigns, &mut trail, &mut trail_id, &mut level, &mut watchers, &mut marks, &mut watcher_to_clause, &mut vsids_counter) {
                 return SATResult::UNSAT
+            }
+            // New learnt clause has been added
+            vsids_interval += 1;
+            if vsids_interval > num_vars {
+                vsids_interval = 0;
+                for i in 0..vsids_counter.len() {
+                    vsids_counter[i] /= 3.0;
+                }
+            }
+            // Restart 
+            restart_interval += 1;
+            if restart_interval > num_vars*5 {
+                restart_interval = 0;
+                restart(&clauses, &learnt_clauses, &mut assigns, &mut trail, &mut trail_id, &mut watchers, &mut marks, &mut level, &mut vsids_counter);
             }
         }
         // If decision level is 0, clauses can be simplified.
         if level.len() == 1 { simplify_clauses(&clauses, &learnt_clauses, &assigns, &mut watchers, &mut watcher_to_clause); }
 
-        if !decide(&mut assigns, &mut trail, &mut trail_id, &mut level, &mut marks, &mut watcher_to_clause) {
+        if !decide(&mut assigns, &mut trail, &mut trail_id, &mut level, &mut marks, &mut watcher_to_clause, &vsids_counter) {
             let result = assigns.clone();
             return SATResult::SAT(result)
         }
@@ -182,6 +203,19 @@ fn simplify_clauses(clauses: &Box<[Clause]>, learnt_clauses: &Vec<Clause>, assig
     for i in 0..learnt_clauses.len() {
         if watchers[clauses.len()+i].0 == watchers[clauses.len()+i].1 { continue; }
         simplify_clause(clauses.len()+i, &learnt_clauses[i], assigns, watchers, watcher_to_clause);
+    }
+}
+
+fn count_vsids_for_clause(clause: &Clause, vsids_counter: &mut Vec<f64>) {
+    for lit in clause.lits() {
+        let id = 2*lit.var().to_u64() + match lit.sign() { Sign::Pos => 0, Sign::Neg => 1 };
+        vsids_counter[id as usize] += 1.0;
+    }
+}
+
+fn initialize_vsids_counter(clauses: &Box<[Clause]>, vsids_counter: &mut Vec<f64>) {
+    for clause in clauses.iter() {
+        count_vsids_for_clause(clause, vsids_counter);
     }
 }
 
@@ -317,32 +351,43 @@ fn boolean_constraint_propagation(clauses: &Box<[Clause]>, learnt_clauses: &Vec<
 }
 
 // select a variable that is not currently assigned, and give it a value
-fn decide(assigns: &mut Vec<LBool>, trail: &mut Vec<Trail>, trail_id: &mut Vec<usize>, level: &mut Vec<i64>, marks: &mut Vec<bool>, watcher_to_clause: &mut Vec<HashSet<(Sign,usize)>>) -> bool {
+fn decide(assigns: &mut Vec<LBool>, trail: &mut Vec<Trail>, trail_id: &mut Vec<usize>, level: &mut Vec<i64>, marks: &mut Vec<bool>, watcher_to_clause: &mut Vec<HashSet<(Sign,usize)>>, vsids_counter: &Vec<f64>) -> bool {
     // there are no more unassigned variables -> false
     // otherwise                              -> true
+    let mut assign_id = 0;
+    let mut max_count = 0.0;
     for i in 1..assigns.len() {
         match assigns[i] {
             LBool::BOTTOM => {
-                assigns[i] = LBool::TRUE;
-                trail.push(Trail::new_assigned_trail(i, true));
-                trail_id[i] = trail.len()-1;
-                level.push(trail.len() as i64 - 1);
-
-                info!("Decide: x{} is assigned to true", i);
-                warn!("Decide: x{} is assigned to true", i);
-                for &(sign,clause_id) in &watcher_to_clause[i] {
-                    marks[clause_id] = sign == Sign::Neg;
+                if max_count < vsids_counter[2*i] {
+                    max_count = vsids_counter[2*i];
+                    assign_id = i;
+                } else if max_count < vsids_counter[2*i+1] {
+                    max_count = vsids_counter[2*i+1];
+                    assign_id = i;
                 }
-                return true
             },
             _ => ()
         }
+    }
+    if assign_id != 0 {
+        assigns[assign_id] = LBool::TRUE;
+        trail.push(Trail::new_assigned_trail(assign_id, true));
+        trail_id[assign_id] = trail.len()-1;
+        level.push(trail.len() as i64 - 1);
+
+        info!("Decide: x{} is assigned to true", assign_id);
+        warn!("Decide: x{} is assigned to true", assign_id);
+        for &(sign,clause_id) in &watcher_to_clause[assign_id] {
+            marks[clause_id] = sign == Sign::Neg;
+        }
+        return true
     }
     info!("Decide: there are no more unassigned variables");
     return false
 }
 
-fn resolve_conflict(clauses: &Box<[Clause]>, learnt_clauses: &mut Vec<Clause>, assigns: &mut Vec<LBool>, trail: &mut Vec<Trail>, trail_id: &mut Vec<usize>, level: &mut Vec<i64>, watchers: &mut Vec<(Lit,Lit)>, marks: &mut Vec<bool>, watcher_to_clause: &mut Vec<HashSet<(Sign,usize)>>) -> bool {
+fn resolve_conflict(clauses: &Box<[Clause]>, learnt_clauses: &mut Vec<Clause>, assigns: &mut Vec<LBool>, trail: &mut Vec<Trail>, trail_id: &mut Vec<usize>, level: &mut Vec<i64>, watchers: &mut Vec<(Lit,Lit)>, marks: &mut Vec<bool>, watcher_to_clause: &mut Vec<HashSet<(Sign,usize)>>, vsids_counter: &mut Vec<f64>) -> bool {
     info!("Resolve conflict");
     if level.len() == 1 {    // current decision level is 0, so this proposition is unsatisfiable
         return false
@@ -405,7 +450,9 @@ fn resolve_conflict(clauses: &Box<[Clause]>, learnt_clauses: &mut Vec<Clause>, a
                     //marks[clauses.len()..].fill(true);  // learnt clauses are marked
                     //marks.fill(true);
                     marks.push(true);
-                    check_watchers(clauses, learnt_clauses, assigns, watchers, marks);
+
+                    // VSIDS counter
+                    count_vsids_for_clause(&learnt_clause, vsids_counter);
 
                     // add learnt clause
                     learnt_clauses.push(learnt_clause);
@@ -418,6 +465,8 @@ fn resolve_conflict(clauses: &Box<[Clause]>, learnt_clauses: &mut Vec<Clause>, a
                     trail.truncate(level[back_level+1] as usize);
                     level.truncate(back_level+1);
 
+                    check_watchers(clauses, learnt_clauses, assigns, watchers, marks);
+
                     info!("trail: {:?}", trail);
                     info!("assign: {:?}", assigns);
                     info!("level: {:?}", level);
@@ -426,5 +475,24 @@ fn resolve_conflict(clauses: &Box<[Clause]>, learnt_clauses: &mut Vec<Clause>, a
                 }
             }
         }
+    }
+}
+
+fn restart(clauses: &Box<[Clause]>, learnt_clauses: &Vec<Clause>, assigns: &mut Vec<LBool>, trail: &mut Vec<Trail>, trail_id: &mut Vec<usize>, watchers: &mut Vec<(Lit,Lit)>, marks: &mut Vec<bool>, level: &mut Vec<i64>, vsids_counter: &mut Vec<f64>) {
+    for t in &trail[level[1] as usize..] {
+        let index = t.literal.var().to_u64() as usize;
+        assigns[index] = LBool::BOTTOM;
+        trail_id[index] = 0;
+    }
+    trail.truncate(level[1] as usize);
+    level.truncate(1);
+
+    check_watchers(clauses, learnt_clauses, assigns, watchers, marks);
+    vsids_counter.fill(0.0);
+    for i in 0..clauses.len() {
+        count_vsids_for_clause(&clauses[i], vsids_counter);
+    }
+    for i in 0..learnt_clauses.len() {
+        count_vsids_for_clause(&learnt_clauses[i], vsids_counter);
     }
 }
