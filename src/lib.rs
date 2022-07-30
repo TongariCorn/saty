@@ -64,6 +64,31 @@ pub fn print_result(assigns: &Vec<LBool>) -> String {
     return str
 }
 
+fn print_confict_trail(clauses: &Box<[Clause]>, learnt_clauses: &Vec<Clause>, trail: &Vec<Trail>, assigns: &Vec<LBool>, watchers: &Vec<(Lit,Lit)>) {
+    for t in trail {
+        match t.trail_type {
+            TrailType::AssignedTrail => {
+                println!("AssignedTrail({:?}),", t.literal);
+            },
+            TrailType::ImpliedTrail(clause_id) => {
+                if clause_id < clauses.len() {
+                    print!("ImpliedTrail({:?}) from {:?} (", t.literal, &clauses[clause_id]);
+                    for lit in clauses[clause_id].lits() {
+                        print!("{:?}, ", evaluate_literal(assigns[lit.var().to_u64() as usize], *lit));
+                    }
+                    println!(") with watchers {:?}", watchers[clause_id]);
+                } else {
+                    print!("ImpliedTrail({:?}) from Learnt {:?} (", t.literal, &learnt_clauses[clause_id-clauses.len()]);
+                    for lit in learnt_clauses[clause_id-clauses.len()].lits() {
+                        print!("{:?}, ", evaluate_literal(assigns[lit.var().to_u64() as usize], *lit));
+                    }
+                    println!(") with watchers {:?}", watchers[clause_id]);
+                }
+            }
+        }
+    }
+}
+
 pub fn solve_sat(clauses: &Box<[Clause]>, num_vars: u64 ) -> SATResult {
     info!("{:?}", clauses);
     info!("num_vars = {}", num_vars);
@@ -75,19 +100,16 @@ pub fn solve_sat(clauses: &Box<[Clause]>, num_vars: u64 ) -> SATResult {
     let mut trail_id : Vec<usize>      = Vec::with_capacity(num_vars+1); // index in assigns -> index in trail
     let mut level    : Vec<i64>        = Vec::with_capacity(num_vars+1); // separator indices for different decision levels in trail
     let mut watchers : Vec<(Lit, Lit)> = Vec::with_capacity(clauses.len()); // watch two literals in each clauses to make ncp faster
-    let mut marks    : Vec<bool>       = Vec::with_capacity(clauses.len()); // true if each corresponding watcher has changed
-    let mut watcher_to_clause : Vec<HashSet<(Sign, usize)>> = Vec::with_capacity(num_vars+1); // index in assigns -> index of clause where corresponding watcher exists
+    let mut watcher_to_clause : Vec<HashSet<usize>> = Vec::with_capacity(num_vars+1); // index in assigns -> index of clause where corresponding watcher exists
     let mut learnt_clauses: Vec<Clause> = Vec::new();
     let mut vsids_counter: Vec<f64>    = Vec::with_capacity(2*(num_vars+1));    // used for Variable State Independent Decaying Sum decision heuristic
     assigns.resize_with(num_vars+1, Default::default);
     trail_id.resize_with(num_vars+1, Default::default);
-    marks.resize_with(clauses.len(), Default::default);
     watcher_to_clause.resize_with(num_vars+1, Default::default);
     vsids_counter.resize_with(2*(num_vars+1), Default::default);
     level.push(-1); // for simplicity, element at index -1 in trail vector is assumed to be at decision level 0
-    initialize_watchers(&clauses, &mut watchers, &mut marks, &mut watcher_to_clause);
+    initialize_watchers(&clauses, &mut watchers, &mut watcher_to_clause);
     initialize_vsids_counter(&clauses, &mut vsids_counter);
-    println!("VSIDS counter = {:?}", vsids_counter);
 
     let pb = ProgressBar::new(num_vars as u64);
     pb.set_style(ProgressStyle::default_bar().template("[{elapsed_precise}] {bar:40.cyan/blue} {pos:>7}/{len:7} {msg}"));
@@ -96,6 +118,10 @@ pub fn solve_sat(clauses: &Box<[Clause]>, num_vars: u64 ) -> SATResult {
     let mut vsids_interval = 0;
     let mut restart_interval = 0;
 
+    let mut focused_id = 0;   // 0: there is no variable focused
+                              // otherwise: boolean constraint propagation starts from
+                              // x[focused_id].
+
     loop {
         counter += 1;
         if counter > 100 {
@@ -103,9 +129,13 @@ pub fn solve_sat(clauses: &Box<[Clause]>, num_vars: u64 ) -> SATResult {
             pb.set_position((trail.len()-1) as u64);
             pb.set_message(format!("learnt_clauses={}, dl={}",learnt_clauses.len(), level.len()-1));
         }
-        while !boolean_constraint_propagation(&clauses, &learnt_clauses, &mut assigns, &mut trail, &mut trail_id, &mut watchers, &mut marks, &mut watcher_to_clause) {
+        while !boolean_constraint_propagation(&clauses, &learnt_clauses, &mut assigns, &mut trail, &mut trail_id, &mut watchers, &mut watcher_to_clause, focused_id) {
             // Conflict happens
-            if !resolve_conflict(clauses, &mut learnt_clauses, &mut assigns, &mut trail, &mut trail_id, &mut level, &mut watchers, &mut marks, &mut watcher_to_clause, &mut vsids_counter) {
+            if let Some(learnt_id) = resolve_conflict(clauses, &mut learnt_clauses, &mut assigns, &mut trail, &mut trail_id, &mut level, &mut watchers, &mut watcher_to_clause, &mut vsids_counter) {
+                focused_id = learnt_id;
+            } else {
+                print_confict_trail(&clauses, &learnt_clauses, &trail, &assigns, &watchers);
+
                 return SATResult::UNSAT
             }
             // New learnt clause has been added
@@ -116,24 +146,27 @@ pub fn solve_sat(clauses: &Box<[Clause]>, num_vars: u64 ) -> SATResult {
                     vsids_counter[i] /= 3.0;
                 }
             }
+
             // Restart 
             restart_interval += 1;
-            if restart_interval > num_vars*5 {
+            if restart_interval > num_vars*5 && level.len() > 1 {
                 restart_interval = 0;
-                restart(&clauses, &learnt_clauses, &mut assigns, &mut trail, &mut trail_id, &mut watchers, &mut marks, &mut level, &mut vsids_counter);
+                restart(&clauses, &learnt_clauses, &mut assigns, &mut trail, &mut trail_id, &mut level, &mut vsids_counter);
+                focused_id = 0;
             }
         }
         // If decision level is 0, clauses can be simplified.
         if level.len() == 1 { simplify_clauses(&clauses, &learnt_clauses, &assigns, &mut watchers, &mut watcher_to_clause); }
 
-        if !decide(&mut assigns, &mut trail, &mut trail_id, &mut level, &mut marks, &mut watcher_to_clause, &vsids_counter) {
+        focused_id = decide(&mut assigns, &mut trail, &mut trail_id, &mut level, &vsids_counter);
+        if focused_id == 0 {
             let result = assigns.clone();
             return SATResult::SAT(result)
         }
     }
 }
 
-fn initialize_watchers(clauses: &Box<[Clause]>, watchers: &mut Vec<(Lit,Lit)>, marks: &mut Vec<bool>, watcher_to_clause: &mut Vec<HashSet<(Sign,usize)>>) {
+fn initialize_watchers(clauses: &Box<[Clause]>, watchers: &mut Vec<(Lit,Lit)>, watcher_to_clause: &mut Vec<HashSet<usize>>) {
     let mut rng = rand::thread_rng();
     for i in 0..clauses.len() {
         let left = rng.gen_range(0..clauses[i].len());
@@ -143,45 +176,22 @@ fn initialize_watchers(clauses: &Box<[Clause]>, watchers: &mut Vec<(Lit,Lit)>, m
             if left == right {
                 right += 1
             }
-        } else {
-            // unit clause
-            marks[i] = true;
         }
         watchers.push((clauses[i].lits()[left], clauses[i].lits()[right]));
-        watcher_to_clause[clauses[i].lits()[left].var().to_u64() as usize].insert((clauses[i].lits()[left].sign(),i));
-        watcher_to_clause[clauses[i].lits()[right].var().to_u64() as usize].insert((clauses[i].lits()[right].sign(),i));
+        watcher_to_clause[clauses[i].lits()[left].var().to_u64() as usize].insert(i);
+        watcher_to_clause[clauses[i].lits()[right].var().to_u64() as usize].insert(i);
     }
     info!("watchers: {:?}", watchers);
     info!("watcher_to_clause: {:?}", watcher_to_clause);
 }
 
-fn check_watchers(clauses: &Box<[Clause]>, learnt_clauses: &Vec<Clause>, assigns: &Vec<LBool>, watchers: &Vec<(Lit,Lit)>, marks: &mut Vec<bool>) {
-    for clause_id in 0..(clauses.len()+learnt_clauses.len()) {
-        match evaluate_literal(assigns[watchers[clause_id].0.var().to_u64() as usize], watchers[clause_id].0) {
-            LBool::TRUE   => marks[clause_id] = false,
-            LBool::FALSE  => {
-                match evaluate_literal(assigns[watchers[clause_id].1.var().to_u64() as usize], watchers[clause_id].1) {
-                    LBool::TRUE  => marks[clause_id] = false,
-                    _            => marks[clause_id] = true,
-                }
-            },
-            LBool::BOTTOM => {
-                match evaluate_literal(assigns[watchers[clause_id].1.var().to_u64() as usize], watchers[clause_id].1) {
-                    LBool::FALSE => marks[clause_id] = true,
-                    _            => marks[clause_id] = false,
-                }
-            },
-        }
-    }
-}
-
-fn simplify_clause(clause_id: usize, clause: &Clause, assigns: &Vec<LBool>, watchers: &mut Vec<(Lit,Lit)>, watcher_to_clause: &mut Vec<HashSet<(Sign,usize)>>) {
+fn simplify_clause(clause_id: usize, clause: &Clause, assigns: &Vec<LBool>, watchers: &mut Vec<(Lit,Lit)>, watcher_to_clause: &mut Vec<HashSet<usize>>) {
     for i in 0..clause.len() {
         let curr_id: usize =  clause.lits()[i].var().to_u64().try_into().unwrap();
         let literal_value = evaluate_literal(assigns[curr_id], clause.lits()[i]);
         if literal_value == LBool::TRUE {
-            watcher_to_clause[watchers[clause_id].0.var().to_u64() as usize].remove(&(watchers[clause_id].0.sign(),clause_id));
-            watcher_to_clause[watchers[clause_id].1.var().to_u64() as usize].remove(&(watchers[clause_id].0.sign(),clause_id));
+            watcher_to_clause[watchers[clause_id].0.var().to_u64() as usize].remove(&clause_id);
+            watcher_to_clause[watchers[clause_id].1.var().to_u64() as usize].remove(&clause_id);
             watchers[clause_id].0 = clause.lits()[i];
             watchers[clause_id].1 = clause.lits()[i];
             info!("{:?} with clause id {} is simplified by a variable {}", clause, clause_id, curr_id);
@@ -190,7 +200,7 @@ fn simplify_clause(clause_id: usize, clause: &Clause, assigns: &Vec<LBool>, watc
     }
 }
 
-fn simplify_clauses(clauses: &Box<[Clause]>, learnt_clauses: &Vec<Clause>, assigns: &Vec<LBool>, watchers: &mut Vec<(Lit,Lit)>, watcher_to_clause: &mut Vec<HashSet<(Sign,usize)>>) {
+fn simplify_clauses(clauses: &Box<[Clause]>, learnt_clauses: &Vec<Clause>, assigns: &Vec<LBool>, watchers: &mut Vec<(Lit,Lit)>, watcher_to_clause: &mut Vec<HashSet<usize>>) {
     // If there are clauses which is true at decision level 0, these clauses can be ignored.
     // However, we use clause_id to identify each clause in our implementation, and so clauses
     // cannot be removed. Instead, we adopt a way of forcing watchers to watch the same literal
@@ -219,139 +229,136 @@ fn initialize_vsids_counter(clauses: &Box<[Clause]>, vsids_counter: &mut Vec<f64
     }
 }
 
-fn boolean_constraint_propagation_for_clause(clause_id: usize, clause: &Clause, assigns: &mut Vec<LBool>, trail: &mut Vec<Trail>, trail_id: &mut Vec<usize>, watchers: &mut Vec<(Lit,Lit)>, marks: &mut Vec<bool>, watcher_to_clause: &mut Vec<HashSet<(Sign,usize)>>) -> usize {
-    // conflict occurs   -> 0
-    // assignment occurs -> 1
-    // otherwise         -> 2
-    let mut unassigned_exist = false;
-    let mut unassigned_id = 0;
-    for j in 0..clause.len() {
-        let curr_id: usize =  clause.lits()[j].var().to_u64().try_into().unwrap();
-        let literal_value = evaluate_literal(assigns[curr_id], clause.lits()[j]);
-        match literal_value {
-            LBool::TRUE => {
-                // This clause is true
-                info!("{:?} is true", clause);
-                marks[clause_id] = false;
-                return 2
-            },
-            LBool::FALSE => {
-                ()
-            },
-            LBool::BOTTOM => {
-                if unassigned_exist {
-                    // there are more than one unassigned variables in this clause, i.e.,
-                    // unassigned_id & j
-                    info!("There are more than one unassigned variables in {:?}", clause);
-
-                    // replace watchers in this clause
-                    if clause.len() > 2 {
-                        if assigns[watchers[clause_id].0.var().to_u64() as usize] != LBool::BOTTOM {    // replace left watcher
-                            watcher_to_clause[watchers[clause_id].0.var().to_u64() as usize].remove(&(watchers[clause_id].0.sign(),clause_id));
-
-                            if watchers[clause_id].1.var() == clause.lits()[unassigned_id].var() { watchers[clause_id].0 = clause.lits()[j]; }
-                            else { watchers[clause_id].0 = clause.lits()[unassigned_id]; }
-
-                            watcher_to_clause[watchers[clause_id].0.var().to_u64() as usize].insert((watchers[clause_id].0.sign(),clause_id));
-                        } 
-                        if assigns[watchers[clause_id].1.var().to_u64() as usize] != LBool::BOTTOM {    // replace right watcher
-                            watcher_to_clause[watchers[clause_id].1.var().to_u64() as usize].remove(&(watchers[clause_id].1.sign(),clause_id));
-
-                            if watchers[clause_id].0.var() == clause.lits()[unassigned_id].var() { watchers[clause_id].1 = clause.lits()[j]; }
-                            else { watchers[clause_id].1 = clause.lits()[unassigned_id]; }
-
-                            watcher_to_clause[watchers[clause_id].1.var().to_u64() as usize].insert((watchers[clause_id].1.sign(),clause_id));
-                        } 
-                        info!("watcher replacement may have happened at clause {}, new watchers are {:?}", clause_id, watchers);
-                    }
-                    marks[clause_id] = false;
-                    return 2
-                }
-                unassigned_exist = true;
-                unassigned_id = j;
-            }
-        }
-    }
-    if unassigned_exist {   // this clause is unit
-        let curr_id: usize =  clause.lits()[unassigned_id].var().to_u64().try_into().unwrap();
-        info!("{:?} is unit, and a variable {} is implied", clause, curr_id);
-        warn!("{:?} is unit, and a variable {} is implied", clause, curr_id);
-        assigns[curr_id] = match clause.lits()[unassigned_id].sign() {
-            Sign::Pos => LBool::TRUE,
-            Sign::Neg => LBool::FALSE
-        };
-        trail.push(Trail::new_implied_trail(clause.lits()[unassigned_id], clause_id));
-        trail_id[curr_id] = trail.len()-1;
-
-        for &(sign,watcher_clause_id) in &watcher_to_clause[curr_id] {
-            if watcher_clause_id != clause_id {
-                marks[watcher_clause_id] = sign != clause.lits()[unassigned_id].sign();
-            }
-            marks[watcher_clause_id] = watcher_clause_id != clause_id;  // current clause should be true
-        }
-
-        // new assignment happens, so repeat boolean propagation from start
-        return 1
-    } else {    // all literals are false, and conflict occurs
-        info!("Conflict occurs in {:?}", clause);
-        warn!("Conflict occurs in {:?}", clause);
-        trail.push(Trail::new_bottom_trail(clause_id));
-        trail_id[0] = trail.len()-1;
-        return 0
-    }
-}
-
-fn boolean_constraint_propagation(clauses: &Box<[Clause]>, learnt_clauses: &Vec<Clause>, assigns: &mut Vec<LBool>, trail: &mut Vec<Trail>, trail_id: &mut Vec<usize>, watchers: &mut Vec<(Lit,Lit)>, marks: &mut Vec<bool>, watcher_to_clause: &mut Vec<HashSet<(Sign,usize)>>) -> bool {
+fn boolean_constraint_propagation(clauses: &Box<[Clause]>, learnt_clauses: &Vec<Clause>, assigns: &mut Vec<LBool>, trail: &mut Vec<Trail>, trail_id: &mut Vec<usize>, watchers: &mut Vec<(Lit,Lit)>, watcher_to_clause: &mut Vec<HashSet<usize>>, focused_id: usize) -> bool {
     // there are no more implications -> true
     // conflict is produced           -> false
-    info!("Start boolean constraint propagation");
+    info!("Start boolean constraint propagation with focused_id {}", focused_id);
 
-    let mut unchanged = true;
-    loop {
-        info!("assigns: {:?}", assigns);
-        info!("trail: {:?}", trail);
-        info!("trail_id: {:?}", trail_id);
-        info!("learnt clauses: {:?}", learnt_clauses);
-        info!("watchers: {:?}", watchers);
-        info!("marks: {:?}", marks);
-        info!("watcher_to_clause: {:?}", watcher_to_clause);
+    info!("assigns: {:?}", assigns);
+    info!("trail: {:?}", trail);
+    info!("trail_id: {:?}", trail_id);
+    info!("learnt clauses: {:?}", learnt_clauses);
+    info!("watchers: {:?}", watchers);
+    info!("watcher_to_clause: {:?}", watcher_to_clause);
 
-        //info!("check watchers");
-        //check_watchers(assigns, watchers, marks);
+    //info!("check watchers");
+    //check_watchers(assigns, watchers, marks);
 
-        for i in (0..learnt_clauses.len()).rev() {
-            let clause = &learnt_clauses[i];
-            if !marks[clauses.len()+i] { continue; }
+    if focused_id == 0 {  // all variables are inspected
+        for id in 1..assigns.len() {
+            if !boolean_constraint_propagation(clauses, learnt_clauses, assigns, trail, trail_id, watchers, watcher_to_clause, id) { return false }
+        }
+    } else {    // the focused variable is inspected
+        let mut removed_clauses: HashSet<usize> = HashSet::new();
+        let mut unit_clauses: HashSet<(Lit, usize)> = HashSet::new();
+        let mut new_watchers: HashSet<(usize, usize)> = HashSet::new();
 
-            info!("target clause: {:?} with clause id {}", clause, clauses.len()+i);
+        let mut conflict = false;
 
-            match boolean_constraint_propagation_for_clause(clauses.len()+i, clause, assigns, trail, trail_id, watchers, marks, watcher_to_clause) {
-                0 => return false,
-                1 => unchanged = false,
-                _ => ()
+        'clause_for: for &clause_id in &watcher_to_clause[focused_id] {
+            let clause = if clause_id < clauses.len() { &clauses[clause_id] } else { &learnt_clauses[clause_id-clauses.len()] };
+            info!("target clause: {:?} with clause id {}", clause, clause_id);
+
+            // make sure that the focused variable is always the left watcher
+            watchers[clause_id] = if (watchers[clause_id].0.var().to_u64() as usize) == focused_id {
+                watchers[clause_id]
+            } else {
+                (watchers[clause_id].1, watchers[clause_id].0)
+            };
+
+            match evaluate_literal(assigns[focused_id], watchers[clause_id].0) {
+                LBool::TRUE   => continue,  // this clause is true
+                LBool::FALSE  => (),
+                LBool::BOTTOM => {
+                    if clause.lits().len() == 1
+                        || evaluate_literal(assigns[watchers[clause_id].1.var().to_u64() as usize], watchers[clause_id].1) == LBool::FALSE {
+                        // This clause is unit
+                        unit_clauses.insert((watchers[clause_id].0, clause_id));
+                        warn!("{:?} is unit, and a variable {} is implied", clause, focused_id);
+                    }
+                    continue;
+                },
+            }
+            // the left watcher is LBool::FALSE
+            match evaluate_literal(assigns[watchers[clause_id].1.var().to_u64() as usize], watchers[clause_id].1) {
+                LBool::TRUE   => continue,      // this clause is true
+                LBool::FALSE  => {  // conflict occurs in this clause
+                    warn!("yeah Conflict occurs in {:?} with clause_id {}", clause, clause_id);
+                    warn!("left watcher is {:?} with value {:?}", watchers[clause_id].0, evaluate_literal(assigns[watchers[clause_id].0.var().to_u64() as usize], watchers[clause_id].0));
+                    warn!("right watcher is {:?} with value {:?}", watchers[clause_id].1, evaluate_literal(assigns[watchers[clause_id].1.var().to_u64() as usize], watchers[clause_id].1));
+                    trail.push(Trail::new_bottom_trail(clause_id));
+                    trail_id[0] = trail.len()-1;
+                    conflict = true;
+                    break;
+                },
+                LBool::BOTTOM => {
+                    // In this case, watchers on this clause are (LBool::FALSE, LBool::BOTTOM)
+                    // Try to find an unassigned variable other than than the right watcher among this clause
+                    // If there is no other unassigned variable, this clause is unit
+                    for i in 0..clause.len() {
+                        let curr_lit = clause.lits()[i];
+                        if curr_lit == watchers[clause_id].0 || curr_lit == watchers[clause_id].1 { continue; }
+                        match evaluate_literal(assigns[curr_lit.var().to_u64() as usize], curr_lit) {
+                            LBool::FALSE => (),
+                            _ => {
+                                // watcher replacement happens
+                                warn!("watcher replacement: {:?} -> {:?} in {:?}", watchers[clause_id].0, curr_lit, clause);
+                                watchers[clause_id].0 = curr_lit;
+                                removed_clauses.insert(clause_id);
+                                new_watchers.insert((curr_lit.var().to_u64() as usize, clause_id));
+
+                                continue 'clause_for;
+                            }
+                        }
+                    }
+                    
+                    // There is no other unassigned variable
+                    unit_clauses.insert((watchers[clause_id].1, clause_id));
+                    warn!("{:?} is unit, and {:?} is implied", clause, watchers[clause_id].1);
+                }
             }
         }
 
-        for i in 0..clauses.len() {
-            let clause = &clauses[i];
-            if !marks[i] { continue; }
-
-            info!("target clause: {:?} with clause id {}", clause, i);
-
-            match boolean_constraint_propagation_for_clause(i, clause, assigns, trail, trail_id, watchers, marks, watcher_to_clause) {
-                0 => return false,
-                1 => unchanged = false,
-                _ => ()
-            }
+        for item in &removed_clauses {
+            watcher_to_clause[focused_id].remove(item);
         }
-        if unchanged { break; }
-        else { unchanged = true; }
+
+        for (id, clause_id) in new_watchers {
+            watcher_to_clause[id].insert(clause_id);
+        }
+
+        if conflict { return false; }
+
+        for &(unassigned_lit, clause_id) in &unit_clauses {
+            let curr_id: usize =  unassigned_lit.var().to_u64().try_into().unwrap();
+            let value = match unassigned_lit.sign() {
+                Sign::Pos => LBool::TRUE,
+                Sign::Neg => LBool::FALSE
+            };
+
+            if assigns[curr_id] != LBool::BOTTOM {  // This variable was already assigned when processing other unit clause
+                if value != assigns[curr_id] { // Conflict occurs
+                    let clause = if clause_id < clauses.len() { &clauses[clause_id] } else { &learnt_clauses[clause_id-clauses.len()] };
+                    warn!("foo Conflict occurs in {:?} with clause_id {}", clause, clause_id);
+                    trail.push(Trail::new_bottom_trail(clause_id));
+                    trail_id[0] = trail.len()-1;
+                    return false
+                } else { continue; }
+            }
+
+            assigns[curr_id] = value;
+            trail.push(Trail::new_implied_trail(unassigned_lit, clause_id));
+            trail_id[curr_id] = trail.len()-1;
+
+            if !boolean_constraint_propagation(clauses, learnt_clauses, assigns, trail, trail_id, watchers, watcher_to_clause, unassigned_lit.var().to_u64() as usize) { return false }
+        }
     }
+
     return true
 }
 
 // select a variable that is not currently assigned, and give it a value
-fn decide(assigns: &mut Vec<LBool>, trail: &mut Vec<Trail>, trail_id: &mut Vec<usize>, level: &mut Vec<i64>, marks: &mut Vec<bool>, watcher_to_clause: &mut Vec<HashSet<(Sign,usize)>>, vsids_counter: &Vec<f64>) -> bool {
+fn decide(assigns: &mut Vec<LBool>, trail: &mut Vec<Trail>, trail_id: &mut Vec<usize>, level: &mut Vec<i64>, vsids_counter: &Vec<f64>) -> usize {
     // there are no more unassigned variables -> false
     // otherwise                              -> true
     let mut assign_id = 0;
@@ -376,24 +383,20 @@ fn decide(assigns: &mut Vec<LBool>, trail: &mut Vec<Trail>, trail_id: &mut Vec<u
         trail_id[assign_id] = trail.len()-1;
         level.push(trail.len() as i64 - 1);
 
-        info!("Decide: x{} is assigned to true", assign_id);
-        warn!("Decide: x{} is assigned to true", assign_id);
-        for &(sign,clause_id) in &watcher_to_clause[assign_id] {
-            marks[clause_id] = sign == Sign::Neg;
-        }
-        return true
+        warn!("Decide: x{} is assigned to true at decision level {}", assign_id, level.len()-1);
+        return assign_id
     }
     info!("Decide: there are no more unassigned variables");
-    return false
+    return 0
 }
 
-fn resolve_conflict(clauses: &Box<[Clause]>, learnt_clauses: &mut Vec<Clause>, assigns: &mut Vec<LBool>, trail: &mut Vec<Trail>, trail_id: &mut Vec<usize>, level: &mut Vec<i64>, watchers: &mut Vec<(Lit,Lit)>, marks: &mut Vec<bool>, watcher_to_clause: &mut Vec<HashSet<(Sign,usize)>>, vsids_counter: &mut Vec<f64>) -> bool {
-    info!("Resolve conflict");
+fn resolve_conflict(clauses: &Box<[Clause]>, learnt_clauses: &mut Vec<Clause>, assigns: &mut Vec<LBool>, trail: &mut Vec<Trail>, trail_id: &mut Vec<usize>, level: &mut Vec<i64>, watchers: &mut Vec<(Lit,Lit)>, watcher_to_clause: &mut Vec<HashSet<usize>>, vsids_counter: &mut Vec<f64>) -> Option<usize> {
+    warn!("Resolve conflict");
+    //warn!("trail: {:?}", trail);
+    warn!("level: {:?}", level);
     if level.len() == 1 {    // current decision level is 0, so this proposition is unsatisfiable
-        return false
+        return None
     }
-    info!("trail: {:?}", trail);
-    info!("level: {:?}", level);
 
     let mut learnt_vertex: Vec<usize> = Vec::new(); // list of index w.r.t. trail vector
     learnt_vertex.push(trail_id[0]); // Initialize learnt_vertex with bottom, whose index is 0
@@ -420,6 +423,7 @@ fn resolve_conflict(clauses: &Box<[Clause]>, learnt_clauses: &mut Vec<Clause>, a
                 if learnt_vertex.len() == 1 || (learnt_vertex[learnt_vertex.len() - 2] as i64) < *level.last().unwrap() {
                     // found UIP, so construct a learnt clause from learnt_vertex
                     // backjump to the second largest decision level
+                    let learnt_lit = negate_literal(trail[*learnt_vertex.last().unwrap()].literal);
                     let back_level = if learnt_vertex.len() == 1 { 0 } else { 
                         // check the second largest decision level among learnt_vertex
                         let mut l = 0;
@@ -441,15 +445,11 @@ fn resolve_conflict(clauses: &Box<[Clause]>, learnt_clauses: &mut Vec<Clause>, a
                     warn!("learnt clause: {:?}, dl: {} -> {}", learnt_clause, level.len()-1, back_level);
 
                     // add new watchers before learnt_clause is moved
-                    let mut rng = rand::thread_rng();
-                    let left = if learnt_clause.len() == 1 { 0 } else { rng.gen_range(0..learnt_clause.len()-1) };
+                    let left = if learnt_clause.len() == 1 { 0 } else { learnt_clause.len()-2 };
                     let right = learnt_clause.len()-1;
                     watchers.push((learnt_clause.lits()[left], learnt_clause.lits()[right]));
-                    watcher_to_clause[learnt_clause.lits()[ left].var().to_u64() as usize].insert((learnt_clause.lits()[ left].sign(),clauses.len() + learnt_clauses.len()));
-                    watcher_to_clause[learnt_clause.lits()[right].var().to_u64() as usize].insert((learnt_clause.lits()[right].sign(),clauses.len() + learnt_clauses.len()));
-                    //marks[clauses.len()..].fill(true);  // learnt clauses are marked
-                    //marks.fill(true);
-                    marks.push(true);
+                    watcher_to_clause[learnt_clause.lits()[ left].var().to_u64() as usize].insert(clauses.len() + learnt_clauses.len());
+                    watcher_to_clause[learnt_clause.lits()[right].var().to_u64() as usize].insert(clauses.len() + learnt_clauses.len());
 
                     // VSIDS counter
                     count_vsids_for_clause(&learnt_clause, vsids_counter);
@@ -465,20 +465,27 @@ fn resolve_conflict(clauses: &Box<[Clause]>, learnt_clauses: &mut Vec<Clause>, a
                     trail.truncate(level[back_level+1] as usize);
                     level.truncate(back_level+1);
 
-                    check_watchers(clauses, learnt_clauses, assigns, watchers, marks);
+                    let learnt_id = learnt_lit.var().to_u64() as usize;
+                    assigns[learnt_id] = match learnt_lit.sign() {
+                        Sign::Pos => LBool::TRUE,
+                        Sign::Neg => LBool::FALSE
+                    };
+                    trail.push(Trail::new_implied_trail(learnt_lit, clauses.len()+learnt_clauses.len()-1));
+                    trail_id[learnt_id] = trail.len()-1;
+                    warn!("a variable {} is implied by the learnt clause {:?}", learnt_id, learnt_clauses.last().unwrap());
 
                     info!("trail: {:?}", trail);
                     info!("assign: {:?}", assigns);
                     info!("level: {:?}", level);
 
-                    return true
+                    return Some(learnt_id);
                 }
             }
         }
     }
 }
 
-fn restart(clauses: &Box<[Clause]>, learnt_clauses: &Vec<Clause>, assigns: &mut Vec<LBool>, trail: &mut Vec<Trail>, trail_id: &mut Vec<usize>, watchers: &mut Vec<(Lit,Lit)>, marks: &mut Vec<bool>, level: &mut Vec<i64>, vsids_counter: &mut Vec<f64>) {
+fn restart(clauses: &Box<[Clause]>, learnt_clauses: &Vec<Clause>, assigns: &mut Vec<LBool>, trail: &mut Vec<Trail>, trail_id: &mut Vec<usize>, level: &mut Vec<i64>, vsids_counter: &mut Vec<f64>) {
     for t in &trail[level[1] as usize..] {
         let index = t.literal.var().to_u64() as usize;
         assigns[index] = LBool::BOTTOM;
@@ -487,7 +494,6 @@ fn restart(clauses: &Box<[Clause]>, learnt_clauses: &Vec<Clause>, assigns: &mut 
     trail.truncate(level[1] as usize);
     level.truncate(1);
 
-    check_watchers(clauses, learnt_clauses, assigns, watchers, marks);
     vsids_counter.fill(0.0);
     for i in 0..clauses.len() {
         count_vsids_for_clause(&clauses[i], vsids_counter);

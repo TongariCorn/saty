@@ -39,19 +39,19 @@ fn main() {
             match result {
                 SATResult::SAT(assigns) => {
                     println!("satisfiable with {:?}", saty::print_result(&assigns));
-                    info!("satisfiable with {:?}", saty::print_result(&assigns));
+                    warn!("satisfiable with {:?}", saty::print_result(&assigns));
 
                     if saty::sanity_check(&clauses, &assigns) {
                         println!("SANITY CHECK: SUCCESS");
-                        info!("SANITY CHECK: SUCCESS");
+                        warn!("SANITY CHECK: SUCCESS");
                     } else {
                         println!("SANITY CHECK: FAILURE");
-                        info!("SANITY CHECK: FAILURE");
+                        warn!("SANITY CHECK: FAILURE");
                     }
                 },
                 SATResult::UNSAT => {
                     println!("unsatisfiable");
-                    info!("unsatisfiable");
+                    warn!("unsatisfiable");
                 }
             };
         },
