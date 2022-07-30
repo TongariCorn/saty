@@ -1,4 +1,6 @@
+#![feature(map_first_last)]
 use std::collections::HashSet;
+use std::collections::BTreeSet;
 use rand::Rng;
 use dimacs::{Clause, Sign, Lit};
 mod types;
@@ -241,8 +243,6 @@ fn boolean_constraint_propagation(clauses: &Box<[Clause]>, learnt_clauses: &Vec<
     info!("watchers: {:?}", watchers);
     info!("watcher_to_clause: {:?}", watcher_to_clause);
 
-    //info!("check watchers");
-    //check_watchers(assigns, watchers, marks);
 
     if focused_id == 0 {  // all variables are inspected
         for id in 1..assigns.len() {
@@ -283,9 +283,7 @@ fn boolean_constraint_propagation(clauses: &Box<[Clause]>, learnt_clauses: &Vec<
             match evaluate_literal(assigns[watchers[clause_id].1.var().to_u64() as usize], watchers[clause_id].1) {
                 LBool::TRUE   => continue,      // this clause is true
                 LBool::FALSE  => {  // conflict occurs in this clause
-                    warn!("yeah Conflict occurs in {:?} with clause_id {}", clause, clause_id);
-                    warn!("left watcher is {:?} with value {:?}", watchers[clause_id].0, evaluate_literal(assigns[watchers[clause_id].0.var().to_u64() as usize], watchers[clause_id].0));
-                    warn!("right watcher is {:?} with value {:?}", watchers[clause_id].1, evaluate_literal(assigns[watchers[clause_id].1.var().to_u64() as usize], watchers[clause_id].1));
+                    warn!("Conflict occurs in {:?} with clause_id {}", clause, clause_id);
                     trail.push(Trail::new_bottom_trail(clause_id));
                     trail_id[0] = trail.len()-1;
                     conflict = true;
@@ -339,7 +337,7 @@ fn boolean_constraint_propagation(clauses: &Box<[Clause]>, learnt_clauses: &Vec<
             if assigns[curr_id] != LBool::BOTTOM {  // This variable was already assigned when processing other unit clause
                 if value != assigns[curr_id] { // Conflict occurs
                     let clause = if clause_id < clauses.len() { &clauses[clause_id] } else { &learnt_clauses[clause_id-clauses.len()] };
-                    warn!("foo Conflict occurs in {:?} with clause_id {}", clause, clause_id);
+                    warn!("Conflict occurs in {:?} with clause_id {}", clause, clause_id);
                     trail.push(Trail::new_bottom_trail(clause_id));
                     trail_id[0] = trail.len()-1;
                     return false
@@ -398,29 +396,26 @@ fn resolve_conflict(clauses: &Box<[Clause]>, learnt_clauses: &mut Vec<Clause>, a
         return None
     }
 
-    let mut learnt_vertex: Vec<usize> = Vec::new(); // list of index w.r.t. trail vector
-    learnt_vertex.push(trail_id[0]); // Initialize learnt_vertex with bottom, whose index is 0
+    let mut learnt_vertex = BTreeSet::new(); // list of index w.r.t. trail vector
+    learnt_vertex.insert(trail_id[0]); // Initialize learnt_vertex with bottom, whose index is 0
     
     // There is a UIP at decision level d, when the number of literals in learnt_vertex
     // assigned at decision level d is 1.
     loop {
 
         let last_trail = &trail[*learnt_vertex.last().unwrap()];
-        let last_vertex = last_trail.literal.var();
         match &last_trail.trail_type {
             TrailType::AssignedTrail => {   // Assume there is no clause which contains the same variable
             },
             TrailType::ImpliedTrail(clause_id) => {
                 let clause = if *clause_id < clauses.len() { &clauses[*clause_id] } else { &learnt_clauses[*clause_id-clauses.len()] };
                 for lit in clause.lits() {
-                    learnt_vertex.push(trail_id[lit.var().to_u64() as usize]);
+                    learnt_vertex.insert(trail_id[lit.var().to_u64() as usize]);
                 }
-                learnt_vertex.sort();
-                learnt_vertex.dedup();
-                learnt_vertex.retain(|vertex| trail[*vertex].literal.var() != last_vertex);
+                learnt_vertex.pop_last();
 
                 info!("learnt_vertex: {:?}", learnt_vertex);
-                if learnt_vertex.len() == 1 || (learnt_vertex[learnt_vertex.len() - 2] as i64) < *level.last().unwrap() {
+                if learnt_vertex.len() == 1 || (*learnt_vertex.iter().nth_back(1).unwrap() as i64) < *level.last().unwrap() {
                     // found UIP, so construct a learnt clause from learnt_vertex
                     // backjump to the second largest decision level
                     let learnt_lit = negate_literal(trail[*learnt_vertex.last().unwrap()].literal);
@@ -428,7 +423,7 @@ fn resolve_conflict(clauses: &Box<[Clause]>, learnt_clauses: &mut Vec<Clause>, a
                         // check the second largest decision level among learnt_vertex
                         let mut l = 0;
                         for dl in (0..level.len()-1).rev() {
-                            if level[dl] <= learnt_vertex[learnt_vertex.len() - 2] as i64 {
+                            if level[dl] <= *learnt_vertex.iter().nth_back(1).unwrap() as i64 {
                                 l = dl;
                                 break;
                             }

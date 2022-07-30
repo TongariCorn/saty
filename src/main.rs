@@ -25,11 +25,6 @@ fn main() {
     let filename = &args[1];
     let str = fs::read_to_string(filename).expect("Something went wrong reading the file");
 
-/*    let str = "p cnf 3 3
-1 0
--1 -2 3 0
--1 -2 -3";
-*/   
     let result = parse_dimacs(&str);
 
     match result.unwrap() {
